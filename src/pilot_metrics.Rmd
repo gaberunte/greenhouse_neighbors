@@ -1,0 +1,24 @@
+---
+title: "pilot study metrics"
+author: "Gabe Runte"
+date: "2/16/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(here)
+library(janitor)
+library(vegan)
+library(phyloseq)
+library(metagenomeSeq)
+```
+
+```{r read in data, message=FALSE}
+size = read_csv(here("data", "ghecto_pilot_sizemetrics.csv"))
+biomass = read_csv(here("data", "ghecto_pilot_biomass.csv"))
+#community = = read_csv(here("data", "ghecto_pilot_community.csv"))
+
+```
+
