@@ -13,12 +13,77 @@ library(janitor)
 library(vegan)
 library(phyloseq)
 library(metagenomeSeq)
+library(lubridate)
+library(janitor)
 ```
 
 ```{r read in data, message=FALSE}
 size = read_csv(here("data", "ghecto_pilot_sizemetrics.csv"))
 biomass = read_csv(here("data", "ghecto_pilot_biomass.csv"))
-#community = = read_csv(here("data", "ghecto_pilot_community.csv"))
+community = read_csv(here("data", "seedling_measurements.csv")) %>% 
+  clean_names()
 
 ```
+
+```{r}
+biomass = biomass %>% 
+  mutate(plant_mass = total_mass_g - bag_mass_g)
+above = biomass %>% 
+  filter(above_below =="a") %>% 
+  rename(above_mass = plant_mass)%>% 
+  select("id", "above_mass")
+below = biomass %>% 
+  filter(above_below =="b")%>% 
+  rename(below_mass = plant_mass) %>% 
+  select("id", "below_mass")
+
+mass = above %>% 
+  full_join(below) %>% 
+  mutate(pct_above = above_mass/(above_mass+below_mass))%>% 
+  mutate(pct_below = below_mass/(above_mass+below_mass))
+
+
+```
+
+```{r}
+#subset community to a single obs per individual
+individuals = community[1:1438,] 
+pilot_seedlings = individuals %>% 
+  select("seedling_id", "seedling_sp", "soil_type") %>% 
+  rename("id" = "seedling_id") %>% 
+  right_join(mass) %>% 
+  left_join(size) %>% 
+  #group_by(soil_type, seedling_sp) %>% 
+  mutate(diameter_std = (diameter_mm-mean(diameter_mm))/sd(diameter_mm)) %>%
+  mutate(height_std = (height_cm-mean(height_cm))/sd(height_cm)) %>%
+  ungroup()
+
+pilot_bc = pilot_seedlings %>% 
+  filter(seedling_sp == "P")
+pilot_oak = pilot_seedlings %>% 
+  filter(seedling_sp == "Q")
+
+
+ggplot(pilot_seedlings)+
+  geom_boxplot(aes(x=seedling_sp, y=pct_above, fill= soil_type))
+ggplot(pilot_seedlings)+
+  geom_boxplot(aes(x=seedling_sp, y=pct_below, fill= soil_type))
+ggplot(pilot_seedlings)+
+  geom_boxplot(aes(x=seedling_sp, y=height_std, fill= soil_type))
+ggplot(pilot_seedlings)+
+  geom_boxplot(aes(x=soil_type, y=diameter_mm, fill= soil_type))+
+  facet_wrap(~seedling_sp)
+
+ggplot(pilot_bc)+
+  geom_boxplot(aes(soil_type, diameter_mm, fill=soil_type))
+ggplot(pilot_bc)+
+  geom_boxplot(aes(soil_type, height_cm, fill=soil_type))
+```
+
+
+
+
+
+
+
 
