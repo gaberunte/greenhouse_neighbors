@@ -1,0 +1,41 @@
+---
+title: "GH Reps"
+author: "Gabe Runte"
+date: "3/16/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(here)
+```
+
+```{r create tibble for ordering}
+
+seedling_1 = c("bb", "bb", "bb", "bb", "bq", "bq", "bq", "qb", "qb", "qq","bc", "qc", "bb", "qq", "bq" , "qb")
+seedling_2 = c("bb", "bq", "qb", "qq", "bq", "qb", "qq", "qb", "qq", "qq","bc", "qc", "bc", "qc", "bc" , "qc")
+count = c(15,30,30,30,15,30,30,15,30,15,15,15,25,25,25,25)
+
+design = tibble(seedling_1, seedling_2, count) %>% 
+  mutate(group = paste(seedling_1, seedling_2, sep="_x_"))
+
+groups = rep(NaN, 370)
+for(i in 1:length(design$seedling_1)){
+  rep(design$group[i], design$count[i])
+  
+}
+set.seed(9321)
+sequence_table = tibble(sequence = seq(1, 370),
+       group = rep(design$group, design$count)) %>% 
+  mutate(group = sample(group)) 
+sequence_table
+
+sequence_table %>% 
+  group_by(group) %>% 
+  summarize(n = n())
+write_csv(sequence_table, here("data", "sequence_for_gh.csv"))
+
+```
+ 
