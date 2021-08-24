@@ -1,0 +1,227 @@
+---
+title: "mock_diss"
+author: "Gabe Runte"
+date: "2/23/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(here)
+library(janitor)
+library(vegan)
+library(phyloseq)
+library(metagenomeSeq)
+library(lubridate)
+library(janitor)
+library(calecopal)
+library(phyloseq)
+```
+
+```{r}
+seedling_sp = c(rep("bigcone", 16), rep("oak", 16))
+soil = c(rep("bigcone", 8), rep("oak", 8),rep("bigcone", 8), rep("oak", 8))
+
+comm = tibble(seedling_sp, soil) %>% 
+  mutate(replicate = rep(1:8, 4)) %>% 
+  mutate(id = paste(seedling_sp, soil, replicate, sep= "_"))
+```
+
+```{r totally random}
+spp.num = 8
+otu.simple <- matrix(data= rep(NaN, (spp.num*length(seedling_sp))), nrow = length(seedling_sp), ncol = spp.num)
+colnames(otu.simple) <- paste("OTU", 1:spp.num, sep= ".")
+rownames(otu.simple) <- comm$id
+
+
+poisson1 <- rpois(1000, lambda=3)
+poisson2 <- rpois(1000, lambda=2)
+poisson3 <- rpois(1000, lambda=1)
+poisson4 <- rpois(1000, lambda=.5)
+
+for(i in 1:nrow(otu.simple)){
+  otu.simple[i,1] <- sample(poisson1, 1)
+  if(otu.simple[i,1] < spp.num){otu.simple[i,2] <- sample(poisson2, 1)} else{otu.simple[i,2] <-0}
+  if(rowSums(otu.simple[,1:2])[i] < spp.num){otu.simple[i,3] <- sample(poisson3, 1)} else{otu.simple[i,3] <-0}
+  if(rowSums(otu.simple[,1:3])[i] < spp.num){otu.simple[i,4] <- sample(poisson4, 1)} else{otu.simple[i,4] <-0}
+  if(rowSums(otu.simple[,1:4])[i] < spp.num){otu.simple[i,5] <- sample(poisson4, 1)} else{otu.simple[i,5] <-0}
+  if(rowSums(otu.simple[,1:5])[i] < spp.num){otu.simple[i,6] <- sample(poisson4, 1)} else{otu.simple[i,6] <-0}
+  if(rowSums(otu.simple[,1:6])[i] < spp.num){otu.simple[i,7] <- sample(poisson4, 1)} else{otu.simple[i,7] <-0}
+  if(rowSums(otu.simple[,1:7])[i] < spp.num){otu.simple[i,8] <- sample(poisson4, 1)} else{otu.simple[i,8] <-0}
+}
+
+otu.tab = otu_table(otu.simple, taxa_are_rows = FALSE)
+sam.tab = sample_data(comm)
+sample_names(sam.tab) = comm$id
+pilot_phy = phyloseq(otu.tab, sam.tab)
+
+dist.rand = distance(pilot_phy, method="bray")
+#final.otu = rarefy_even_depth(otu.tab)
+
+adonis2(dist.rand~soil+seedling_sp)
+```
+
+```{r try more precise}
+spp.num = 8
+otu.simple <- matrix(data= rep(NaN, (spp.num*length(seedling_sp))), nrow = length(seedling_sp), ncol = spp.num)
+colnames(otu.simple) <- paste("OTU", 1:spp.num, sep= ".")
+rownames(otu.simple) <- comm$id
+
+
+poisson1 <- rpois(1000, lambda=3)
+poisson2 <- rpois(1000, lambda=2)
+poisson3 <- rpois(1000, lambda=1)
+poisson4 <- rpois(1000, lambda=.5)
+
+for(i in 1:16){
+  otu.simple[i,1] <- sample(poisson1, 1)
+  if(otu.simple[i,1] < spp.num){otu.simple[i,2] <- sample(poisson2, 1)} else{otu.simple[i,2] <-0}
+  if(rowSums(otu.simple[,1:2])[i] < spp.num){otu.simple[i,3] <- sample(poisson3, 1)} else{otu.simple[i,3] <-0}
+  if(rowSums(otu.simple[,1:3])[i] < spp.num){otu.simple[i,4] <- sample(poisson4, 1)} else{otu.simple[i,4] <-0}
+  if(rowSums(otu.simple[,1:4])[i] < spp.num){otu.simple[i,5] <- sample(poisson4, 1)} else{otu.simple[i,5] <-0}
+  if(rowSums(otu.simple[,1:5])[i] < spp.num){otu.simple[i,6] <- sample(poisson4, 1)} else{otu.simple[i,6] <-0}
+  if(rowSums(otu.simple[,1:6])[i] < spp.num){otu.simple[i,7] <- sample(poisson4, 1)} else{otu.simple[i,7] <-0}
+  if(rowSums(otu.simple[,1:7])[i] < spp.num){otu.simple[i,8] <- sample(poisson4, 1)} else{otu.simple[i,8] <-0}
+}
+for(i in 17:32){
+  otu.simple[i,8] <- sample(poisson1, 1)
+  if(otu.simple[i,8] < spp.num){otu.simple[i,7] <- sample(poisson2, 1)} else{otu.simple[i,7] <-0}
+  if(rowSums(otu.simple[,7:8])[i] < spp.num){otu.simple[i,6] <- sample(poisson3, 1)} else{otu.simple[i,6] <-0}
+  if(rowSums(otu.simple[,6:8])[i] < spp.num){otu.simple[i,5] <- sample(poisson4, 1)} else{otu.simple[i,5] <-0}
+  if(rowSums(otu.simple[,5:8])[i] < spp.num){otu.simple[i,4] <- sample(poisson4, 1)} else{otu.simple[i,4] <-0}
+  if(rowSums(otu.simple[,4:8])[i] < spp.num){otu.simple[i,3] <- sample(poisson4, 1)} else{otu.simple[i,3] <-0}
+  if(rowSums(otu.simple[,3:8])[i] < spp.num){otu.simple[i,2] <- sample(poisson4, 1)} else{otu.simple[i,2] <-0}
+  if(rowSums(otu.simple[,2:8])[i] < spp.num){otu.simple[i,1] <- sample(poisson4, 1)} else{otu.simple[i,1] <-0}
+}
+
+
+otu.tab = otu_table(otu.simple, taxa_are_rows = FALSE)
+sam.tab = sample_data(comm)
+sample_names(sam.tab) = comm$id
+pilot_phy = phyloseq(otu.tab, sam.tab)
+
+dist.rand = distance(pilot_phy, method="bray")
+#final.otu = rarefy_even_depth(otu.tab)
+
+adonis2(dist.rand~soil+seedling_sp)
+```
+
+
+
+```{r can i simulate}
+spp.num = 12
+otu.simple <- matrix(data= rep(NaN, (spp.num*length(seedling_sp))), nrow = length(seedling_sp), ncol = spp.num)
+colnames(otu.simple) <- paste("OTU", 1:spp.num, sep= ".")
+rownames(otu.simple) <- comm$id
+
+
+poisson1 <- rpois(1000, lambda=3)
+poisson2 <- rpois(1000, lambda=2)
+poisson3 <- rpois(1000, lambda=1)
+poisson4 <- rpois(1000, lambda=.5)
+
+for(i in 1:8){
+  otu.simple[i,1] <- sample(poisson1, 1)
+  if(otu.simple[i,1] < spp.num){otu.simple[i,2] <- sample(poisson2, 1)} else{otu.simple[i,2] <-0}
+  if(rowSums(otu.simple[,1:2])[i] < spp.num){otu.simple[i,3] <- sample(poisson3, 1)} else{otu.simple[i,3] <-0}
+  if(rowSums(otu.simple[,1:3])[i] < spp.num){otu.simple[i,4] <- sample(poisson4, 1)} else{otu.simple[i,4] <-0}
+  if(rowSums(otu.simple[,1:4])[i] < spp.num){otu.simple[i,5] <- sample(poisson4, 1)} else{otu.simple[i,5] <-0}
+  if(rowSums(otu.simple[,1:5])[i] < spp.num){otu.simple[i,6] <- sample(poisson4, 1)} else{otu.simple[i,6] <-0}
+  if(rowSums(otu.simple[,1:6])[i] < spp.num){otu.simple[i,7] <- sample(poisson4, 1)} else{otu.simple[i,7] <-0}
+  if(rowSums(otu.simple[,1:7])[i] < spp.num){otu.simple[i,8] <- sample(poisson4, 1)} else{otu.simple[i,8] <-0}
+  if(rowSums(otu.simple[,1:8])[i] < spp.num){otu.simple[i,9] <- sample(poisson4, 1)} else{otu.simple[i,9] <-0}
+  if(rowSums(otu.simple[,1:9])[i] < spp.num){otu.simple[i,10] <- sample(poisson4, 1)} else{otu.simple[i,10] <-0}
+  if(rowSums(otu.simple[,1:10])[i] < spp.num){otu.simple[i,11] <- sample(poisson4, 1)} else{otu.simple[i,11] <-0}
+  if(rowSums(otu.simple[,1:11])[i] < spp.num){otu.simple[i,12] <- sample(poisson4, 1)} else{otu.simple[i,12] <-0}
+}
+for(i in 9:16){
+    otu.simple[i,1] <- sample(poisson1, 1)
+  if(otu.simple[i,1] < spp.num){otu.simple[i,2] <- sample(poisson2, 1)} else{otu.simple[i,2] <-0}
+  if(rowSums(otu.simple[,1:2])[i] < spp.num){otu.simple[i,3] <- sample(poisson3, 1)} else{otu.simple[i,3] <-0}
+  if(rowSums(otu.simple[,1:3])[i] < spp.num){otu.simple[i,4] <- sample(poisson4, 1)} else{otu.simple[i,4] <-0}
+  if(rowSums(otu.simple[,1:4])[i] < spp.num){otu.simple[i,5] <- sample(poisson4, 1)} else{otu.simple[i,5] <-0}
+  if(rowSums(otu.simple[,1:5])[i] < spp.num){otu.simple[i,6] <- sample(poisson4, 1)} else{otu.simple[i,6] <-0}
+  if(rowSums(otu.simple[,1:6])[i] < spp.num){otu.simple[i,7] <- sample(poisson4, 1)} else{otu.simple[i,7] <-0}
+  if(rowSums(otu.simple[,1:7])[i] < spp.num){otu.simple[i,8] <- sample(poisson4, 1)} else{otu.simple[i,8] <-0}
+  if(rowSums(otu.simple[,1:8])[i] < spp.num){otu.simple[i,9] <- sample(poisson4, 1)} else{otu.simple[i,9] <-0}
+  if(rowSums(otu.simple[,1:9])[i] < spp.num){otu.simple[i,10] <- sample(poisson4, 1)} else{otu.simple[i,10] <-0}
+  if(rowSums(otu.simple[,1:10])[i] < spp.num){otu.simple[i,11] <- sample(poisson4, 1)} else{otu.simple[i,11] <-0}
+  if(rowSums(otu.simple[,1:11])[i] < spp.num){otu.simple[i,12] <- sample(poisson4, 1)} else{otu.simple[i,12] <-0}
+    }
+for(i in 17:24){
+    otu.simple[i,1] <- sample(poisson1, 1)
+  if(otu.simple[i,1] < spp.num){otu.simple[i,2] <- sample(poisson2, 1)} else{otu.simple[i,2] <-0}
+  if(rowSums(otu.simple[,1:2])[i] < spp.num){otu.simple[i,3] <- sample(poisson3, 1)} else{otu.simple[i,3] <-0}
+  if(rowSums(otu.simple[,1:3])[i] < spp.num){otu.simple[i,4] <- sample(poisson4, 1)} else{otu.simple[i,4] <-0}
+  if(rowSums(otu.simple[,1:4])[i] < spp.num){otu.simple[i,5] <- sample(poisson4, 1)} else{otu.simple[i,5] <-0}
+  if(rowSums(otu.simple[,1:5])[i] < spp.num){otu.simple[i,6] <- sample(poisson4, 1)} else{otu.simple[i,6] <-0}
+  if(rowSums(otu.simple[,1:6])[i] < spp.num){otu.simple[i,7] <- sample(poisson4, 1)} else{otu.simple[i,7] <-0}
+  if(rowSums(otu.simple[,1:7])[i] < spp.num){otu.simple[i,8] <- sample(poisson4, 1)} else{otu.simple[i,8] <-0}
+  if(rowSums(otu.simple[,1:8])[i] < spp.num){otu.simple[i,9] <- sample(poisson4, 1)} else{otu.simple[i,9] <-0}
+  if(rowSums(otu.simple[,1:9])[i] < spp.num){otu.simple[i,10] <- sample(poisson4, 1)} else{otu.simple[i,10] <-0}
+  if(rowSums(otu.simple[,1:10])[i] < spp.num){otu.simple[i,11] <- sample(poisson4, 1)} else{otu.simple[i,11] <-0}
+  if(rowSums(otu.simple[,1:11])[i] < spp.num){otu.simple[i,12] <- sample(poisson4, 1)} else{otu.simple[i,12] <-0}
+    }
+for(i in 25:32){
+    otu.simple[i,1] <- sample(poisson1, 1)
+  if(otu.simple[i,1] < spp.num){otu.simple[i,2] <- sample(poisson2, 1)} else{otu.simple[i,2] <-0}
+  if(rowSums(otu.simple[,1:2])[i] < spp.num){otu.simple[i,3] <- sample(poisson3, 1)} else{otu.simple[i,3] <-0}
+  if(rowSums(otu.simple[,1:3])[i] < spp.num){otu.simple[i,4] <- sample(poisson4, 1)} else{otu.simple[i,4] <-0}
+  if(rowSums(otu.simple[,1:4])[i] < spp.num){otu.simple[i,5] <- sample(poisson4, 1)} else{otu.simple[i,5] <-0}
+  if(rowSums(otu.simple[,1:5])[i] < spp.num){otu.simple[i,6] <- sample(poisson4, 1)} else{otu.simple[i,6] <-0}
+  if(rowSums(otu.simple[,1:6])[i] < spp.num){otu.simple[i,7] <- sample(poisson4, 1)} else{otu.simple[i,7] <-0}
+  if(rowSums(otu.simple[,1:7])[i] < spp.num){otu.simple[i,8] <- sample(poisson4, 1)} else{otu.simple[i,8] <-0}
+  if(rowSums(otu.simple[,1:8])[i] < spp.num){otu.simple[i,9] <- sample(poisson4, 1)} else{otu.simple[i,9] <-0}
+  if(rowSums(otu.simple[,1:9])[i] < spp.num){otu.simple[i,10] <- sample(poisson4, 1)} else{otu.simple[i,10] <-0}
+  if(rowSums(otu.simple[,1:10])[i] < spp.num){otu.simple[i,11] <- sample(poisson4, 1)} else{otu.simple[i,11] <-0}
+  if(rowSums(otu.simple[,1:11])[i] < spp.num){otu.simple[i,12] <- sample(poisson4, 1)} else{otu.simple[i,12] <-0}
+    }
+
+otu.tab = otu_table(otu.simple, taxa_are_rows = FALSE)
+sam.tab = sample_data(comm)
+sample_names(sam.tab) = comm$id
+pilot_phy = phyloseq(otu.tab, sam.tab)
+
+dist.rand = distance(pilot_phy, method="bray")
+#final.otu = rarefy_even_depth(otu.tab)
+
+adonis2(dist.rand~soil+seedling_sp)
+
+pilot_meta = make_metagenomeSeq(pilot_phy)
+
+
+
+pilot_meta.1 <-MRcounts(pilot_meta, norm= TRUE, log= TRUE)
+
+pilot_meta.2 <- t(pilot_meta.1)
+
+pilot_meta.3 <- vegdist(pilot_meta.2, method= "bray", binary=FALSE, diag=TRUE, upper=TRUE)
+set.seed(209)
+pilot_meta.4 <- metaMDS(pilot_meta.3, distance = "bray", k=2, trymax = 1000)
+ggplot(pilot_meta.4) +
+  geom_point(aes(NMDS1, NMDS2), size =3, color= "gray47")
+
+```
+
+```{r}
+rand_vect <- function(N, M, sd = 1, pos.only = TRUE) {
+  vec <- rnorm(N, M/N, sd)
+  if (abs(sum(vec)) < 0.01) vec <- vec + 1
+  vec <- round(vec / sum(vec) * M)
+  deviation <- M - sum(vec)
+  for (. in seq_len(abs(deviation))) {
+    vec[i] <- vec[i <- sample(N, 1)] + sign(deviation)
+  }
+  if (pos.only) while (any(vec < 0)) {
+    negs <- vec < 0
+    pos  <- vec > 0
+    vec[negs][i] <- vec[negs][i <- sample(sum(negs), 1)] + 1
+    vec[pos][i]  <- vec[pos ][i <- sample(sum(pos ), 1)] - 1
+  }
+  vec
+}
+
+rand_vect(5, 8)
+```
+

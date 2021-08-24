@@ -1,0 +1,68 @@
+---
+title: "roottips"
+author: "Gabe Runte"
+date: "6/1/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(here)
+library(janitor)
+library(lubridate)
+library(calecopal)
+library(tidyverse)
+library(dplyr)
+```
+
+```{r tip sheet cleanup, message=FALSE, warning=FALSE}
+tips = read_csv(here("data", "ghecto_repotting_root_pulling_data.csv")) %>% 
+  mutate(pct_colonization = colonization_numerator/ colonization_denominator)
+tips_longer = tips %>% 
+  pivot_longer(cols=6:13, names_to = "row", values_to = "morphotype") %>% 
+  mutate(m_2nd = substr(morphotype, 2,2)) %>% 
+  mutate(morphotype = substr(morphotype, 1,1)) %>%
+  mutate(questionable = case_when(
+    morphotype == "Q" ~ 1,
+    m_2nd == "Q" ~ 1)) %>% 
+  mutate(questionable = case_when(
+    questionable == 1 ~ 1,
+    is.na(questionable) ~ 0)) %>% 
+  select(-m_2nd) %>% 
+  mutate(plate_short = substr(plate, 5,6)) 
+
+tip_ids = tips_longer %>% 
+  filter(!is.na(morphotype))
+
+```
+
+```{r sacrifice data, message=FALSE, warning=FALSE}
+harvested = read_csv(here("data", "ghecto_repotting_dry_biomass.csv"))
+
+h.individuals = unique(harvested$seedling_id)
+harvested_tips = tips_morphed %>% 
+  filter(seedling_id %in% h.individuals)
+
+hold = harvested_tips %>% 
+  filter(morphotype != "Q") %>% 
+  filter(plate_short == 23)
+```
+
+```{r seedling data, message=FALSE, warning=FALSE}
+seedlings = read_csv(here("data", "seedling_measurements.csv"))
+
+seedling.treatments = seedlings %>% 
+  select(1:3) %>% 
+  clean_names() 
+seedling.treatments = seedling.treatments[match(unique(seedlings$seedling_id), seedlings$seedling_id),]
+
+destructive_tips = harvested_tips %>% 
+  left_join(seedling.treatments)
+```
+
+
+
+
+
+
+

@@ -15,6 +15,7 @@ library(phyloseq)
 library(metagenomeSeq)
 library(lubridate)
 library(janitor)
+library(calecopal)
 ```
 
 ```{r read in data, message=FALSE}
@@ -41,49 +42,182 @@ mass = above %>%
   full_join(below) %>% 
   mutate(pct_above = above_mass/(above_mass+below_mass))%>% 
   mutate(pct_below = below_mass/(above_mass+below_mass))
+mass = mass[-26,]
 
 
 ```
 
-```{r}
+```{r, message= FALSE}
 #subset community to a single obs per individual
 individuals = community[1:1438,] 
 pilot_seedlings = individuals %>% 
   select("seedling_id", "seedling_sp", "soil_type") %>% 
   rename("id" = "seedling_id") %>% 
   right_join(mass) %>% 
-  left_join(size) %>% 
-  #group_by(soil_type, seedling_sp) %>% 
+  left_join(size) %>%
+  mutate(home_away = if_else(seedling_sp==soil_type, "home", "away")) %>% 
+  mutate(spp_fancy = recode(seedling_sp, "P"= "Bigcone", "Q"= "Oak")) %>% 
+  group_by(soil_type, seedling_sp) %>% 
   mutate(diameter_std = (diameter_mm-mean(diameter_mm))/sd(diameter_mm)) %>%
   mutate(height_std = (height_cm-mean(height_cm))/sd(height_cm)) %>%
+  mutate(above_std = (above_mass-mean(above_mass))/sd(above_mass)) %>%
+  mutate(below_std = (below_mass-mean(below_mass))/sd(below_mass)) %>%
+  mutate(diameter_cent = (diameter_mm-mean(diameter_mm))) %>%
+  mutate(height_cent = (height_cm-mean(height_cm))) %>%
   ungroup()
 
 pilot_bc = pilot_seedlings %>% 
-  filter(seedling_sp == "P")
+  filter(seedling_sp == "P")%>% 
+  mutate(col_pct = (as.numeric(colonization_per_50)/50))
 pilot_oak = pilot_seedlings %>% 
-  filter(seedling_sp == "Q")
+  filter(seedling_sp == "Q") 
 
 
 ggplot(pilot_seedlings)+
-  geom_boxplot(aes(x=seedling_sp, y=pct_above, fill= soil_type))
+  geom_boxplot(aes(x=seedling_sp, y=pct_above, fill= home_away))
 ggplot(pilot_seedlings)+
-  geom_boxplot(aes(x=seedling_sp, y=pct_below, fill= soil_type))
-ggplot(pilot_seedlings)+
-  geom_boxplot(aes(x=seedling_sp, y=height_std, fill= soil_type))
-ggplot(pilot_seedlings)+
-  geom_boxplot(aes(x=soil_type, y=diameter_mm, fill= soil_type))+
-  facet_wrap(~seedling_sp)
+  geom_boxplot(aes(x=seedling_sp, y=pct_below, fill= home_away))
+#ggplot(pilot_seedlings)+
+#  geom_boxplot(aes(x=seedling_sp, y=height_std, fill= home_away))
 
 ggplot(pilot_bc)+
-  geom_boxplot(aes(soil_type, diameter_mm, fill=soil_type))
+  geom_boxplot(aes(soil_type, diameter_mm, fill=home_away))
 ggplot(pilot_bc)+
-  geom_boxplot(aes(soil_type, height_cm, fill=soil_type))
+  geom_boxplot(aes(soil_type, height_cm, fill=home_away))
+ggplot(pilot_bc)+
+  geom_boxplot(aes(soil_type, above_mass+below_mass, fill=home_away))
+
+ggplot(pilot_oak)+
+  geom_boxplot(aes(soil_type, diameter_mm, fill=home_away))
+ggplot(pilot_oak)+
+  geom_boxplot(aes(soil_type, height_cm, fill=home_away))
+ggplot(pilot_oak)+
+  geom_boxplot(aes(soil_type, above_mass+below_mass, fill=home_away))
+
+ggplot(pilot_bc)+
+  geom_boxplot(aes(soil_type, pct_below, fill=home_away))
+ggplot(pilot_oak)+
+  geom_boxplot(aes(soil_type, pct_below, fill=home_away))
+
+t.test(pilot_bc$pct_below~pilot_bc$home_away)
+t.test(pilot_oak$pct_below~pilot_oak$home_away)
+
+ggplot(pilot_oak)+
+  geom_density(aes(diameter_mm, fill=home_away), alpha= 0.6)+
+  theme_bw()
+ggplot(pilot_bc)+
+  geom_density(aes(diameter_mm, fill=home_away), alpha= 0.6)+
+  theme_bw()
+
+ggplot(pilot_oak)+
+  geom_density(aes(height_cm, fill=home_away), alpha= 0.6)+
+  theme_bw()
+ggplot(pilot_bc)+
+  geom_density(aes(height_cm, fill=home_away), alpha= 0.6)+
+  theme_bw()
 ```
 
 
+```{r}
+ggplot(pilot_oak)+
+  geom_density(aes(diameter_mm, fill=home_away), alpha= 0.6)+
+  theme_bw()
+ggplot(pilot_oak)+
+  geom_density(aes(height_cm, fill=home_away), alpha= 0.6)+
+  theme_bw()
+ggplot(pilot_oak)+
+  geom_density(aes(pct_above, fill=home_away), alpha= 0.6)+
+  theme_bw()
+ggplot(pilot_oak)+
+  geom_density(aes(above_mass+below_mass, fill=home_away), alpha= 0.6)+
+  theme_bw()
+
+ggplot(pilot_bc)+
+  geom_density(aes(diameter_mm, fill=home_away), alpha= 0.6)+
+  theme_bw()
+ggplot(pilot_bc)+
+  geom_density(aes(height_cm, fill=home_away), alpha= 0.6)+
+  theme_bw()
+ggplot(pilot_bc)+
+  geom_density(aes(pct_below, fill=home_away), alpha= 0.6)+
+  theme_bw()
+ggplot(pilot_bc)+
+  geom_density(aes(above_mass+below_mass, fill=home_away), alpha= 0.6)+
+  theme_bw()
+
+ggplot(pilot_seedlings)+
+  geom_density(aes(height_std, fill=home_away), alpha= 0.6)+
+  facet_wrap(~spp_fancy)+
+  theme_bw() +
+    labs(
+    x= "Seedling height (standardized)",
+    y = "Density"
+  ) +
+  scale_fill_manual(name= "Home vs. Away", labels = c("Away", "Home"), values= cal_palette("arbutus")[3:4])+
+ggsave(here("figures", "bc_pilot_height.jpg"), height= 5, width=7)
+
+ggplot(pilot_seedlings)+
+  geom_density(aes(diameter_std, fill=home_away), alpha= 0.6)+
+  facet_wrap(~spp_fancy)+
+  theme_bw() +
+    labs(
+    x= "Stem diameter (standardized)",
+    y = "Density"
+  ) +
+  scale_fill_manual(name= "Home vs. Away", labels = c("Away", "Home"), values= cal_palette("arbutus")[3:4])+
+ggsave(here("figures", "bc_pilot_diameter.jpg"), height= 5, width=7)
+```
+
+```{r}
+m1 = lm((above_mass+below_mass)~soil_type*seedling_sp*diameter_mm,data=pilot_seedlings)
+summary(m1)
+anova(m1)
+TukeyHSD(aov(m1))
+
+m2 = lm(pct_below~home_away*seedling_sp,data=pilot_seedlings)
+summary(m2)
+anova(m2)
+TukeyHSD(aov(m2))
+
+ggplot(pilot_bc)+
+  geom_density(aes(col_pct, fill= home_away), alpha= 0.6)+
+  theme_bw() +
+    labs(
+    x= "Percent Colonization of Root Tips",
+    y = "Density"
+  ) +
+  scale_fill_manual(name= "Home vs. Away", labels = c("Away", "Home"), values= cal_palette("arbutus")[3:4])+
+ggsave(here("figures", "bc_pilot_colonization.jpg"), height= 5, width=7)
 
 
 
+```
+
+
+```{r}
+ggplot(pilot_seedlings)+
+  geom_density(aes(pct_below, fill=home_away), alpha= 0.6)+
+  facet_wrap(~spp_fancy) +
+  theme_bw() +
+    labs(
+    x= "Percent biomass belowground",
+    y = "Density"
+  ) +
+  scale_fill_manual(name= "Home vs. Away", labels = c("Away", "Home"), values= cal_palette("arbutus")[3:4])+
+ggsave(here("figures", "bc_pilot_below.jpg"), height= 5, width=7)
+
+ggplot(pilot_seedlings)+
+  geom_density(aes(above_std+below_std, fill=home_away), alpha= 0.6)+
+  facet_wrap(~spp_fancy)
+
+ggplot(pilot_seedlings)+
+  geom_density(aes(above_std, fill=home_away), alpha= 0.6)+
+  facet_wrap(~spp_fancy)
+
+ggplot(pilot_seedlings)+
+  geom_density(aes(below_std, fill=home_away), alpha= 0.6)+
+  facet_wrap(~spp_fancy)
+```
 
 
 
