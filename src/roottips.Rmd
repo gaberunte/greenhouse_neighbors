@@ -58,8 +58,20 @@ seedling.treatments = seedling.treatments[match(unique(seedlings$seedling_id), s
 
 destructive_tips = harvested_tips %>% 
   left_join(seedling.treatments)
+
+#write.csv(destructive_tips, here("data", "roottip_destructive_library1.csv"))
 ```
 
+```{r library sheet}
+library = harvested_tips %>% 
+  filter(plate %in% c(219024, 219025, 219026, 219027)) %>% 
+  select("seedling_id", "plate", "column", "row", "puller", "morphotype") %>% 
+  mutate(sample_id = paste(seedling_id, row, sep= "")) %>% 
+  relocate(sample_id)
+
+#write.csv(library, here("data", "roottip_destructive_library1.csv"))
+
+```
 
 
 
