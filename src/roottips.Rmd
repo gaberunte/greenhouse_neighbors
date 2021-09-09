@@ -40,7 +40,7 @@ tip_ids = tips_longer %>%
 harvested = read_csv(here("data", "ghecto_repotting_dry_biomass.csv"))
 
 h.individuals = unique(harvested$seedling_id)
-harvested_tips = tips_morphed %>% 
+harvested_tips = tip_ids %>% 
   filter(seedling_id %in% h.individuals)
 
 hold = harvested_tips %>% 

@@ -25,8 +25,8 @@ t3 = read_csv(here("data", "ghecto_repotting_seedling_data.csv")) %>%
 
 #from the grow up in year 1 before repotting
 seedlings = read_csv(here("data", "seedling_measurements.csv")) %>%
-  clean_names()  %>% 
-  filter(timepoint == 1) %>% 
+  clean_names()
+seedlings = seedlings[(match(unique(seedlings$seedling_id), seedlings$seedling_id)),] %>% 
   select(seedling_id, seedling_sp, soil_type)
 
 #first measurements after repotting
@@ -69,65 +69,6 @@ bigcone = seedling_size %>%
   filter(height_cm < 10)
 ```
 
-```{r}
-inthehood = c(potting$seedling_1, potting$seedling_2)
-
-t4 = post_repotting$seedling_id
-
-t4in = t4[c(which(t4  %in% inthehood))]
-
-no.pot = sort(setdiff(t4, inthehood))
-notmeasured= sort(setdiff(inthehood, t4))
-
-no.pot
-
-notmeasured
-
-which(notmeasured %in% t3$seedling_id)
-
-neighblong = potting %>% 
-   tidyr::pivot_longer(
-     cols = starts_with("seed"), 
-     values_to = "seedling") %>% 
-  select("pot", "seedling")
-
-help = neighblong[which(neighblong$seedling %in% notmeasured),]
-
-write_csv(help, here("data", "notmeasured.csv"))
-
-no.pot = tibble(no.pot)
-write_csv(tibble(no.pot), here("data", "nopot.csv"))
-```
-
-```{r}
-
-
-
-
-ggplot(oaks, aes(x=soil_type, y=height_cm, fill= soil_type)) +
-  geom_boxplot()+
-  facet_wrap(~timepoint) +
-  labs(title = "Oak height")
-
-ggplot(oaks, aes(x=soil_type, y=diameter_mm, fill= soil_type)) +
-  geom_boxplot()+
-  facet_wrap(~timepoint) +
-  labs(title = "Oak diameter")
-
-##################
-
-ggplot(bigcone, aes(x=soil_type, y=height_cm, fill= soil_type)) +
-  geom_boxplot()+
-  facet_wrap(~timepoint) +
-  labs(title = "Bigcone height")
-
-ggplot(bigcone, aes(x=soil_type, y=diameter_mm, fill= soil_type)) +
-  geom_boxplot() +
-  facet_wrap(~timepoint) +
-  labs(title = "Bigcone diameter")
-
-
-```
 
 ```{r}
 neighbor.facts = master %>% 
@@ -161,6 +102,60 @@ master4 = master4 %>%
   filter(change.ht > -10)
 ```
 
+```{r}
+inthehood = c(potting$seedling_1, potting$seedling_2)
+
+t4 = post_repotting$seedling_id
+t4in = t4[c(which(t4  %in% inthehood))]
+
+master4 = distinct(master4)
+sum.m4 = master4 %>% 
+  group_by(neighbor) %>% 
+  summarise(n())
+
+sum.t3 = t3 %>% 
+  group_by(seedling_id) %>% 
+  summarise(n())
+
+
+
+#as.numeric(duplicated(post_repotting$seedling_id))
+
+
+```
+
+```{r}
+
+
+
+
+ggplot(oaks, aes(x=soil_type, y=height_cm, fill= soil_type)) +
+  geom_boxplot()+
+  facet_wrap(~timepoint) +
+  labs(title = "Oak height")
+
+ggplot(oaks, aes(x=soil_type, y=diameter_mm, fill= soil_type)) +
+  geom_boxplot()+
+  facet_wrap(~timepoint) +
+  labs(title = "Oak diameter")
+
+##################
+
+ggplot(bigcone, aes(x=soil_type, y=height_cm, fill= soil_type)) +
+  geom_boxplot()+
+  facet_wrap(~timepoint) +
+  labs(title = "Bigcone height")
+
+ggplot(bigcone, aes(x=soil_type, y=diameter_mm, fill= soil_type)) +
+  geom_boxplot() +
+  facet_wrap(~timepoint) +
+  labs(title = "Bigcone diameter")
+
+
+```
+
+
+
 
 ```{r}
 m4.bigcone = master4 %>% 
@@ -174,7 +169,7 @@ m4.oak = master4 %>%
 
 ```{r}
 m4.bigcone %>% 
-  group_by(seedling_sp, soil_type,  neighb.spp) %>% 
+  group_by(seedling_sp, soil_type) %>% 
   summarize(n=n())
 
 m4.oak %>% 
@@ -219,11 +214,23 @@ ggplot(m4.bigcone) +
   labs(title = "Bigcones faceted by Soil Type ")
 
 ggplot(m4.bigcone) +
-  geom_boxplot(aes(x=soil_type, y= height_cm, fill= neighb.spp), alpha=0.6)+
+  geom_boxplot(aes(x=soil_type, y= height_cm), alpha=0.6)+
   theme_bw()+
   scale_fill_brewer(palette="Set1")+
   labs(title = "Bigcones no faceting!        ")
 
+ggplot(m4.bigcone) +
+  geom_boxplot(aes(x=soil_type, y= chlorosis), alpha=0.6)+
+  theme_bw()+
+  scale_fill_brewer(palette="Set1")+
+  labs(title = "Bigcones no faceting!")
+
+TukeyHSD(aov(diameter_mm~soil_type,data=m4.bigcone))
+t.test(m4.bigcone[m4.bigcone$soil_type=='P',]$chlorosis,m4.bigcone[m4.bigcone$soil_type=='Q',]$chlorosis)
+
+
+TukeyHSD(aov(change.ht~neighb.soil,data=m4.bigcone))
+TukeyHSD(aov(change.ht~neighb.soil*soil_type,data=m4.bigcone))
 ```
 
 
@@ -255,15 +262,86 @@ ggplot(m4.oak) +
 
 ```{r}
 ggplot(m4.bigcone) +
-  geom_boxplot(aes(x=soil_type, y= change.chl, fill= neighb.spp), alpha=0.6)+
-  facet_wrap(~neighb.spp)+
-  theme_bw()+
-  scale_fill_brewer(palette="Set1")
-
-ggplot(m4.oak) +
   geom_boxplot(aes(x=soil_type, y= change.ht, fill= neighb.spp), alpha=0.6)+
   facet_wrap(~neighb.spp)+
   theme_bw()+
+  scale_fill_brewer(palette="Set1") +
+  labs(title= "Bigcone height change faceted by neighbor species", y= "Change in Height (cm)", x= "Soil type of focal individual")
+
+ggplot(m4.bigcone) +
+  geom_boxplot(aes(x=soil_type, y= change.ht, fill= neighb.spp), alpha=0.6)+
+  facet_grid(rows=vars(neighb.spp), cols= vars(neighb.soil))+
+  theme_bw()+
+  scale_fill_brewer(palette="Set1") +
+  labs(title= "Bigcone height change faceted by neighbor species and neighbor soil",
+       y= "Change in Height (cm)", 
+       x= "Soil type of focal individual",
+       fill = "Neighbor Species")
+
+ggplot(m4.bigcone) +
+  geom_boxplot(aes(x=neighb.soil, y= change.ht, fill= neighb.spp), alpha=0.6)+
+  facet_grid(rows=vars(neighb.spp), cols= vars(soil_type))+
+  theme_bw()+
+  scale_fill_brewer(palette="Set1") +
+  labs(title= "Bigcone height change faceted by neighbor species and self soil",
+       y= "Change in Height (cm)", 
+       x= "Neighbor soil type",
+       fill = "Neighbor Species")
+```
+
+```{r}
+ggplot(m4.oak) +
+  geom_boxplot(aes(x=soil_type, y= change.ht, fill= neighb.spp), alpha=0.6)+
+  facet_grid(rows=vars(neighb.spp), cols= vars(neighb.soil))+
+  theme_bw()+
+  scale_fill_brewer(palette="Set1")
+
+ggplot(m4.bigcone) +
+  geom_boxplot(aes(x=soil_type, y= change.ht, fill= neighb.spp), alpha=0.6)+
+  facet_grid(rows=vars(neighb.spp), cols= vars(neighb.soil))+
+  theme_bw()+
   scale_fill_brewer(palette="Set1")
 ```
+
+
+
+```{r}
+lm1 = lm(change.ht~seedling_sp*soil_type*neighb.spp*neighb.soil, data=master4)
+lm2 = lm(change.ht~seedling_sp*soil_type*neighb.spp, data=master4)
+AIC(lm1)
+summary(lm1)
+anova(lm1, lm2)
+
+lm3 = stepAIC(lm1)
+
+best.lm = lm3$call
+
+summary(best.lm)
+anova(lm(formula = change.ht ~ seedling_sp + soil_type + neighb.soil + 
+    seedling_sp:soil_type + seedling_sp:neighb.soil + soil_type:neighb.soil + 
+    seedling_sp:soil_type:neighb.soil, data = master4))
+
+```
+
+```{r}
+lmb1 = lm(change.ht~soil_type*neighb.spp*neighb.soil, data=m4.bigcone)
+lmb2 = stepAIC(lmb1)
+
+lmb2$call
+bestlmb = lm(formula = change.ht ~ soil_type + neighb.spp + neighb.soil, 
+    data = m4.bigcone)
+
+anova(bestlmb)
+```
+
+```{r}
+lmo1 = lm(change.leaf~soil_type*neighb.spp*neighb.soil, data=m4.oak)
+lmo2 = stepAIC(lmo1)
+
+lmo2$call
+bestlmo = lm(formula = change.leaf ~ soil_type * neighb.spp * neighb.soil, 
+    data = m4.oak)
+anova(bestlmo)
+```
+
 
