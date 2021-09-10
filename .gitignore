@@ -14,7 +14,7 @@ bin-release/
 *.apk
 pilot*
 photos*
-sequencing*
+*sequencing*
 *.fasta
 
 # Project files, i.e. `.project`, `.actionScriptProperties` and `.flexProperties`
