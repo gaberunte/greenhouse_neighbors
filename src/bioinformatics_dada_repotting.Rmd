@@ -7,24 +7,13 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-library(tibble)
+library(dada2)
 library(tidyverse)
 library(here)
+library(ShortRead)
 ```
 
 ```{r, message=FALSE}
-library(devtools)
-devtools::install_github("benjjneb/dada2")
-library(dada2); packageVersion("dada2")
-
-#library(ShortRead)
-
-#if (!requireNamespace("BiocManager", quietly = TRUE))
-   #install.packages("BiocManager")
-## Or you can use earlier versions of Biocondcutor, e.g. if you have a pre-3.6 version of R
-#BiocManager::install("additional_missing_package_1", version = "3.10")
-library(ShortRead)
-
 path <- here("sequencing", "repotting_destructive_tips", "fastqs")
 ```
 
@@ -67,7 +56,7 @@ rbind(FWD.ForwardReads = sapply(FWD.orients, primerHits, fn = fnFs.filtN[[1]]),
 ```
 
 ```{r}
-cutadapt <-  "/Users/moellerlab/miniconda3/envs/cutadaptenv/bin/cutadapt"
+cutadapt <-  "/Users/Gabe/Library/Python/2.7/bin/cutadapt"
 
 system2(cutadapt, args = "--version") # Run shell commands from R
 
@@ -114,6 +103,7 @@ plotQualityProfile(cutFs[1:2])
 plotQualityProfile(cutRs[1:2])
 
 ```
+
 ```{r}
 filtFs <- file.path(path.cut, "filtered", basename(cutFs))
 filtRs <- file.path(path.cut, "filtered", basename(cutRs))
@@ -228,13 +218,9 @@ merged_seqtab <- seqtab %>%
 
 
 ```{r}
-#unite.ref <- "/Volumes/Gabe_Runte_EHD/unite_db/sh_general_release_s_04.02.2020/sh_general_release_dynamic_s_04.02.2020.fasta"
-#taxa <- assignTaxonomy(seqtab.nochim, unite.ref, multithread = TRUE, tryRC = TRUE)
-#write.csv(taxa, "unite_runte.csv")
+unite.ref <- "/Users/Gabe/Desktop/masters/ghecto/data/sh_general_release_all_10.05.2021/sh_general_release_dynamic_all_10.05.2021.fasta"
+taxa <- assignTaxonomy(seqtab.nochim, unite.ref, multithread = TRUE, tryRC = TRUE)
+write.csv(taxa, here("data","unite_runte.csv"))
 ```
 
-```{r}
-ls
-
-```
 
