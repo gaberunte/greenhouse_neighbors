@@ -1,0 +1,162 @@
+---
+title: "Roottip Groups"
+author: "Gabe Runte"
+date: "9/14/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(vegan)
+library(here)
+library(janitor)
+library(phyloseq)
+```
+
+```{r, message= FALSE}
+#reading in data
+taxon.path <- read_csv(here('data', 'taxa_tips.csv')) # taxon path output from UNITE
+taxon.path <- taxon.path %>% 
+  clean_names() 
+names(taxon.path)[1] = "sequence"
+
+funguilds <- read_csv(here('data','tips_guilded_destructive.csv')) # guild data output from FUNGuild
+funguilds <- funguilds %>% 
+  clean_names() %>% 
+ dplyr::select(sequence, taxon, trophic_mode, guild, growth_morphology, confidence_ranking)
+ 
+asv.tab <- read_csv(here('data','otu_tab.csv')) # otu table output from DADA2 and downstream
+asv.tab <- t(asv.tab)
+colnames(asv.tab) <- asv.tab[1,]
+asv.tab <- asv.tab[-1,]
+
+```
+
+```{r metadata, message=FALSE}
+#just before repotting
+seedling_size = read_csv(here("data", "ghecto_repotting_seedling_data.csv")) %>% 
+  mutate(timepoint = "3")
+t3 = read_csv(here("data", "ghecto_repotting_seedling_data.csv")) %>% 
+  mutate(timepoint = "3")
+
+#from the grow up in year 1 before repotting
+seedlings = read_csv(here("data", "seedling_measurements.csv")) %>%
+  clean_names()
+seedlings = seedlings[(match(unique(seedlings$seedling_id), seedlings$seedling_id)),] %>% 
+  select(seedling_id, seedling_sp, soil_type)
+
+seedling_size = seedling_size %>% 
+  left_join(seedlings) 
+
+oaks = seedling_size %>% 
+  filter(seedling_sp == "Q")
+
+bigcone = seedling_size %>% 
+  filter(seedling_sp == "P")
+```
+
+```{r, message=FALSE}
+destroyed = read_csv(here("data", "ghecto_repotting_destruction.csv"))
+meta.destroyed = seedling_size %>% 
+  filter(seedling_id %in% destroyed$seedling_id)
+
+#make copies for each tip row, I am sure there is a more efficient way to do this
+meta.a = meta.destroyed %>% 
+  mutate(seedling_id = paste(seedling_id, "A", sep = ""))
+meta.b = meta.destroyed %>% 
+  mutate(seedling_id = paste(seedling_id, "B", sep = ""))
+meta.c = meta.destroyed %>% 
+  mutate(seedling_id = paste(seedling_id, "C", sep = ""))
+meta.d = meta.destroyed %>% 
+  mutate(seedling_id = paste(seedling_id, "D", sep = ""))
+meta.e = meta.destroyed %>% 
+  mutate(seedling_id = paste(seedling_id, "E", sep = ""))
+meta.f = meta.destroyed %>% 
+  mutate(seedling_id = paste(seedling_id, "F", sep = ""))
+meta.g = meta.destroyed %>% 
+  mutate(seedling_id = paste(seedling_id, "G", sep = ""))
+meta.h = meta.destroyed %>% 
+  mutate(seedling_id = paste(seedling_id, "H", sep = ""))
+
+meta.all = rbind(meta.a, 
+                 meta.b, 
+                 meta.c, 
+                 meta.d, 
+                 meta.e, 
+                 meta.f, 
+                 meta.g, 
+                 meta.h)
+
+
+
+sample_table_all = sample_data(meta.all)
+sample_names(sample_table_all) = meta.all$seedling_id
+
+asv.mat = data.matrix(as_tibble(asv.tab))
+otu_tab = otu_table(asv.mat, taxa_are_rows = TRUE)
+
+tips.phy = phyloseq(sample_table_all, otu_tab)
+```
+
+```{r load function metagenome}
+make_metagenomeSeq = function(physeq) {
+  require("metagenomeSeq")
+  require("phyloseq")
+  # Enforce orientation
+  if (!taxa_are_rows(physeq)) {
+    physeq <- t(physeq)}
+  OTU = as(otu_table(physeq), "matrix")
+  # Convert sample_data to AnnotatedDataFrame
+  ADF = AnnotatedDataFrame(data.frame(sample_data(physeq)))
+  # define dummy 'feature' data for OTUs, using their name Helps with
+  # extraction and relating to taxonomy later on.
+  TDF = AnnotatedDataFrame(data.frame(OTUname = taxa_names(physeq), row.names = taxa_names(physeq)))
+  # Create the metagenomeSeq object
+  MGS = newMRexperiment(counts = OTU, phenoData = ADF, featureData = TDF)
+  # Trigger metagenomeSeq to calculate its Cumulative Sum scaling factor.
+  MGS = cumNorm(MGS)
+  return(MGS)
+}
+```
+
+```{r, message=FALSE}
+tips.meta = make_metagenomeSeq(tips.phy)
+
+tips.css <-MRcounts(tips.meta, norm= TRUE, log= TRUE)
+
+tips.csst <- t(tips.css)
+
+tips.dist <- vegdist(tips.csst, method= "bray", binary=FALSE, diag=TRUE, upper=TRUE)
+
+set.seed(209)
+tips.mds <- metaMDS(tips.dist, distance = "bray", k=2, trymax = 1000)
+
+```
+
+
+```{r switch otu to rra}
+tips.phy = transform_sample_counts(tips.phy, function(x) x/sum(x))
+```
+
+```{r}
+tips.scores = scores(tips.mds)
+tips.scores = data.frame(tips.scores)
+tips.scores$seedling_id = rownames(tips.scores)
+
+tips.scored = meta.all %>% 
+  left_join(tips.scores) %>% 
+  filter(!is.na(NMDS1))
+
+ggplot(data= tips.scored, aes(x= NMDS1, y= NMDS2)) +
+  geom_point(aes(col= seedling_sp)) +
+  facet_wrap(~soil_type)
+
+```
+
+
+
+
+
+

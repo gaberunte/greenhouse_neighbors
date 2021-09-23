@@ -216,11 +216,35 @@ merged_seqtab <- seqtab %>%
   t
 ```
 
-
-```{r}
-unite.ref <- "/Users/Gabe/Desktop/masters/ghecto/data/sh_general_release_all_10.05.2021/sh_general_release_dynamic_all_10.05.2021.fasta"
-taxa <- assignTaxonomy(seqtab.nochim, unite.ref, multithread = TRUE, tryRC = TRUE)
-write.csv(taxa, here("data","unite_runte.csv"))
+```{r create OTUs,  include=FALSE}
+write.csv(merged_seqtab, file= here("data", "otu_tab.csv"))
 ```
 
+```{r}
+otu.tab <- read_csv(here("data", "otu_tab.csv"))
+otu.tab <- t(otu.tab)
+colnames(otu.tab)<- otu.tab[1,]
+otu.tab <- otu.tab[-1,]
 
+write.csv(otu.tab, file= here("data", "otu_tab_cleaned.csv"))
+```
+
+```{r}
+
+unite.ref <- "/Users/Gabe/Desktop/masters/ghecto/data/sh_general_release_all_10.05.2021/sh_general_release_dynamic_all_10.05.2021.fasta"
+seqs <- as.vector(clusters$sequence)
+taxa <- assignTaxonomy(seqs, unite.ref, multithread = TRUE, tryRC = TRUE)
+write.csv(taxa, file=here("data", "taxa_tips.csv") )
+taxa.tib = read_csv(here("data", "taxa_tips.csv")) 
+taxa.tib = taxa.tib %>% 
+  names(taxa.tib)[1] = "sequence"
+
+write.csv(taxa, here("data", "unite_roottip_dectructive_otus.csv"))
+
+
+otu_taxa <- clusters %>% 
+  full_join(taxa.tib)
+
+save.image(here("data", "sept13.RData"))
+
+```
