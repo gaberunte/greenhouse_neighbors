@@ -22,15 +22,39 @@ taxon.path <- taxon.path %>%
   clean_names() 
 names(taxon.path)[1] = "sequence"
 
+clusters = read_csv(here("data", "otu_clusters.csv"))
+unique.clusters = clusters[unique(clusters$cluster),]
+
 funguilds <- read_csv(here('data','tips_guilded_destructive.csv')) # guild data output from FUNGuild
 funguilds <- funguilds %>% 
   clean_names() %>% 
- dplyr::select(sequence, taxon, trophic_mode, guild, growth_morphology, confidence_ranking)
+ dplyr::select(sequence, taxon, trophic_mode, guild, growth_morphology, confidence_ranking) %>% 
+ left_join(clusters)
+#for first match of each cluster...
+ funguilds = funguilds[(match(unique(funguilds$cluster), funguilds$cluster)),]
+
+
+funguilds = funguilds %>% 
+  mutate(otu = paste("OTU",cluster, sep= "")) %>% 
+  arrange(cluster)
+
+
  
 asv.tab <- read_csv(here('data','otu_tab.csv')) # otu table output from DADA2 and downstream
 asv.tab <- t(asv.tab)
 colnames(asv.tab) <- asv.tab[1,]
 asv.tab <- asv.tab[-1,]
+asv.tab <- asv.tab[-dim(asv.tab)[1],]
+
+asv.guilds = asv.tab %>% 
+  as_tibble() %>% 
+  mutate(otu = row.names(asv.tab)) %>% 
+  left_join(funguilds) %>% 
+  filter(confidence_ranking %in% c("Probable", "Highly Probable"))
+
+asv.guild.tab = as.matrix(asv.guilds) 
+  rownames(asv.guild.tab) = paste("OTU", asv.guilds$cluster, sep = "")
+asv.guild.tab = asv.guild.tab[,1:361]
 
 ```
 
@@ -94,10 +118,11 @@ meta.all = rbind(meta.a,
 sample_table_all = sample_data(meta.all)
 sample_names(sample_table_all) = meta.all$seedling_id
 
-asv.mat = data.matrix(as_tibble(asv.tab))
+asv.mat = data.matrix(as_tibble(asv.guild.tab))
 otu_tab = otu_table(asv.mat, taxa_are_rows = TRUE)
 
 tips.phy = phyloseq(sample_table_all, otu_tab)
+tips.phy = transform_sample_counts(tips.phy, function(x) x/sum(x))
 ```
 
 ```{r load function metagenome}
@@ -137,7 +162,6 @@ tips.mds <- metaMDS(tips.dist, distance = "bray", k=2, trymax = 1000)
 
 
 ```{r switch otu to rra}
-tips.phy = transform_sample_counts(tips.phy, function(x) x/sum(x))
 ```
 
 ```{r}
@@ -153,6 +177,7 @@ ggplot(data= tips.scored, aes(x= NMDS1, y= NMDS2)) +
   geom_point(aes(col= seedling_sp)) +
   facet_wrap(~soil_type)
 
+as.matrix(tips.phy@otu_table)
 ```
 
 

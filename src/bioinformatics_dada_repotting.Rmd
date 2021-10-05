@@ -243,7 +243,9 @@ write.csv(taxa, here("data", "unite_roottip_dectructive_otus.csv"))
 
 
 otu_taxa <- clusters %>% 
-  full_join(taxa.tib)
+  full_join(taxa.tib) 
+
+write_csv(clusters, here("data", "otu_clusters.csv"))
 
 save.image(here("data", "sept13.RData"))
 
