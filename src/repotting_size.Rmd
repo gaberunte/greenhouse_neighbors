@@ -16,7 +16,7 @@ library(RColorBrewer)
 ```
 
 
-```{r, message=FALSE}
+```{r}
 #just before repotting
 seedling_size = read_csv(here("data", "ghecto_repotting_seedling_data.csv")) %>% 
   mutate(timepoint = "3")
@@ -26,6 +26,7 @@ t3 = read_csv(here("data", "ghecto_repotting_seedling_data.csv")) %>%
 #from the grow up in year 1 before repotting
 seedlings = read_csv(here("data", "seedling_measurements.csv")) %>%
   clean_names()
+
 seedlings = seedlings[(match(unique(seedlings$seedling_id), seedlings$seedling_id)),] %>% 
   select(seedling_id, seedling_sp, soil_type)
 
@@ -35,7 +36,7 @@ post_repotting = read_csv(here("data", "post_repotting_measurements.csv")) %>%
   mutate(timepoint = "4")
 
 #which seedling was paired with which other seedling? they share a pot number 
-potting = read_csv(here("data", "ghecto_neighbor_pairs.csv")) %>%
+potting = read_csv(here("data", "ghecto_neighbor_pairs.csv")) %>% 
   clean_names()
 
 seedling_size = seedling_size %>% 
