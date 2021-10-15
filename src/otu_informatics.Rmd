@@ -46,15 +46,48 @@ colnames(asv.tab) <- asv.tab[1,]
 asv.tab <- asv.tab[-1,]
 asv.tab <- asv.tab[-dim(asv.tab)[1],]
 
+asv.tab.num = matrix(as.numeric(asv.tab), nrow= nrow(asv.tab), ncol= ncol(asv.tab))
+colnames(asv.tab.num) = colnames(asv.tab)
+rownames(asv.tab.num) = rownames(asv.tab)
+
+asv.tab.relative = matrix(rep(NaN, length(asv.tab)), nrow= nrow(asv.tab), ncol= ncol(asv.tab))
+colnames(asv.tab.relative) = colnames(asv.tab)
+rownames(asv.tab.relative) = rownames(asv.tab)
+
+asv.sums = colSums(asv.tab.num)
+
+for(i in 1:ncol(asv.tab.num)){
+  
+  sum = asv.sums[i]
+  for(j in 1:nrow(asv.tab.num)){
+    
+    asv.tab.relative[j, i] <- asv.tab.num[j, i]/sum
+    
+  }
+  
+}
+
+
 asv.guilds = asv.tab %>% 
   as_tibble() %>% 
   mutate(otu = row.names(asv.tab)) %>% 
-  left_join(funguilds) %>% 
-  filter(confidence_ranking %in% c("Probable", "Highly Probable"))
+  left_join(funguilds) #%>% 
+  #filter(confidence_ranking %in% c("Probable", "Highly Probable"))
 
 asv.guild.tab = as.matrix(asv.guilds) 
   rownames(asv.guild.tab) = paste("OTU", asv.guilds$cluster, sep = "")
 asv.guild.tab = asv.guild.tab[,1:361]
+
+asv.guilds.rel = asv.tab.relative %>% 
+  as_tibble() %>% 
+  mutate(otu = row.names(asv.tab)) %>% 
+  left_join(funguilds) %>% 
+  filter(confidence_ranking %in% c("Probable", "Highly Probable")) %>% 
+  filter(grepl("Symb", trophic_mode))
+
+asv.guild.tab.rel = as.matrix(asv.guilds) 
+rownames(asv.guild.tab.rel) = paste("OTU", asv.guilds$cluster, sep = "")
+asv.guild.tab.rel = asv.guild.tab.rel[,1:361]
 
 ```
 
@@ -123,6 +156,7 @@ otu_tab = otu_table(asv.mat, taxa_are_rows = TRUE)
 
 tips.phy = phyloseq(sample_table_all, otu_tab)
 tips.phy = transform_sample_counts(tips.phy, function(x) x/sum(x))
+
 ```
 
 ```{r load function metagenome}

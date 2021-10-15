@@ -10,9 +10,10 @@ knitr::opts_chunk$set(echo = TRUE)
 library(here)
 library(janitor)
 library(lubridate)
-library(calecopal)
+#library(calecopal)
 library(tidyverse)
 library(dplyr)
+library(vegan)
 ```
 
 ```{r tip sheet cleanup, message=FALSE, warning=FALSE}
@@ -73,7 +74,25 @@ library = harvested_tips %>%
 
 ```
 
+```{r}
+tips.type = tips %>% 
+  left_join(seedlings %>% 
+  select(1:3) %>% 
+    clean_names()) 
 
+groups = tips.type %>% 
+  filter(!is.na(pct_colonization)) %>% 
+  group_by(seedling_sp, soil_type, puller) %>% 
+  summarise(col = mean(pct_colonization),
+            morphs = mean(tip_spp))
+```
+
+```{r}
+destructive_tips %>% 
+  group_by(seedling_id) 
+
+
+```
 
 
 
