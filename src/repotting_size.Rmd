@@ -57,6 +57,8 @@ master = seedling_size %>%
   )) %>% 
   select(!c("pot.x", "pot.y", "seedling_1", "seedling_2"))
 
+
+#finished BM
 oaks = seedling_size %>% 
   filter(seedling_sp == "Q")%>% 
   mutate(zheight = (height_cm- mean(height_cm))/sd(height_cm))%>% 
