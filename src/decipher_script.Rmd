@@ -1,0 +1,50 @@
+---
+title: "Untitled"
+author: "Gabe Runte"
+date: "11/9/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(DECIPHER)
+library(here)
+library(Biostrings)
+```
+
+#load some sanger sequence files
+```{r}
+# = here("sequencing", "tips", "destructive", "11_2021", "scf", "tests")
+sequences = list.files(path = "sequencing/tips/destructive/11_2021/seq")
+
+reads = readDNAStringSet(here("test3.fastq"), "fastq", with.qualities=TRUE)
+
+
+trimmed = TrimDNA(reads,
+	leftPatterns="",
+	rightPatterns="",
+	type="sequences",
+	quality=PhredQuality(mcols(reads)$qualities), 
+	threshold= .85,
+	maxAmbiguities= 0.03)
+
+
+```
+
+
+```{r}
+d = DistanceMatrix(trimmed, type="dist")
+IdClusters(d, method="complete", cutoff=0.03, showPlot=TRUE, type="dendrogram")
+
+fas <- system.file("extdata", "50S_ribosomal_protein_L2.fas", package="DECIPHER")
+dna <- readDNAStringSet(fas)
+
+dna = reads
+aa <- dna #translate(dna)
+inexact <- IdClusters(myXStringSet=aa, method="inexact", cutoff=.03)
+head(inexact)
+apply(inexact, 2, max) 
+```
+
