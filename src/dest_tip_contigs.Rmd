@@ -1,0 +1,62 @@
+---
+title: "Tip sequences"
+author: "Gabe Runte"
+date: "12/9/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(phyloseq)
+library(metagenomeSeq)
+library(vegan)
+library(here)
+library(janitor)
+library(gridExtra)
+library(indicspecies)
+```
+
+```{r, message=FALSE}
+tip_seqs = read_csv(here("data", "repotting_dest_contigs.csv")) %>% 
+  clean_names() %>% 
+  select(name, post_trim_length, sequence, sequence_list_name) %>% 
+  mutate(plate_short = as.numeric(substr(name, 2, 3)))%>% 
+  mutate(column = as.numeric(substr(name, 5, 6)))%>% 
+  mutate(row = substr(name, 7,7)) %>% 
+  mutate(contig.num = as.numeric(substr(sequence_list_name, 8,9)))
+contig_seqs = tip_seqs %>% 
+  filter( !is.na(sequence_list_name))
+
+tips = read_csv(here("data", "ghecto_repotting_root_pulling_data.csv")) %>% 
+  mutate(pct_colonization = colonization_numerator/ colonization_denominator)
+tips_longer = tips %>% 
+  pivot_longer(cols=6:13, names_to = "row", values_to = "morphotype") %>% 
+  mutate(m_2nd = substr(morphotype, 2,2)) %>% 
+  mutate(morphotype = substr(morphotype, 1,1)) %>%
+  mutate(questionable = case_when(
+    morphotype == "Q" ~ 1,
+    m_2nd == "Q" ~ 1)) %>% 
+  mutate(questionable = case_when(
+    questionable == 1 ~ 1,
+    is.na(questionable) ~ 0)) %>% 
+  select(-m_2nd) %>% 
+  mutate(plate_short = as.numeric(substr(plate, 5,6)))
+
+tip_ids = tips_longer %>% 
+  filter(!is.na(morphotype)) 
+
+seedlings = read_csv(here("data", "seedling_measurements.csv")) %>% 
+  clean_names() %>% 
+  select(seedling_id, soil_type, seedling_sp)
+
+tips.master = tips_longer %>% 
+  left_join(seedlings)
+```
+
+```{r}
+contig.master =contig_seqs %>% 
+  left_join(tips.master)
+```
+
