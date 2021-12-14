@@ -16,6 +16,7 @@ library(here)
 library(janitor)
 library(gridExtra)
 library(indicspecies)
+library(dada2)
 ```
 
 ```{r, message=FALSE}
@@ -52,11 +53,102 @@ seedlings = read_csv(here("data", "seedling_measurements.csv")) %>%
   select(seedling_id, soil_type, seedling_sp)
 
 tips.master = tips_longer %>% 
-  left_join(seedlings)
+  left_join(seedlings) %>% 
+  mutate(row = tolower(row))
+
+contig.master =contig_seqs %>% 
+  left_join(tips.master)
+```
+
+```{r, eval = FALSE}
+
+
+unite.ref <- "/Volumes/Gabe_Runte_EHD/unite_db/sh_general_release_s_10.05.2021/sh_general_release_dynamic_s_10.05.2021.fasta"
+
+tiptaxa = assignTaxonomy(contig.master$sequence, unite.ref, multithread = TRUE, tryRC = TRUE)
+
+write.csv(tiptaxa, here("data", "unite_dest_tips.csv"))
 ```
 
 ```{r}
-contig.master =contig_seqs %>% 
-  left_join(tips.master)
+unite_tips = read_csv(here("data", "unite_dest_tips.csv"))
+
+contig.taxonomy = contig.master %>% 
+  bind_cols(unite_tips[,2:8])
+
+contig_wide = contig.taxonomy %>% 
+  mutate(count = 1) %>% 
+  pivot_wider(names_from = sequence_list_name,values_from = count, values_fn = mean, values_fill = 0) 
+
+contig_wider = contig_wide[match(unique(contig_wide$name), contig_wide$name),] %>% 
+  clean_names()
+```
+
+```{r}
+cgroups = contig_wider %>% 
+  group_by(seedling_id) %>% 
+  summarize(
+    soil_type = soil_type,
+    seedling_sp = seedling_sp,
+    colonization_numerator = colonization_numerator,
+    colonization_denominator = colonization_denominator,
+    kingdom = kingdom, 
+    phylum = phylum, 
+    class = class, 
+    order = order, 
+    family = family, 
+    genus = genus, 
+    species = species,
+    c01 = sum(contig_1),
+    c02 = sum(contig_2),
+    c03 = sum(contig_3),
+    c04 = sum(contig_4),
+    c05 = sum(contig_5),
+    c06 = sum(contig_6),
+    c07 = sum(contig_7),
+    c08 = sum(contig_8),
+    c09 = sum(contig_9),
+    c10 = sum(contig_10),
+    c11 = sum(contig_11),
+    c12 = sum(contig_12),
+    c13 = sum(contig_13),
+    c14 = sum(contig_14),
+    c15 = sum(contig_15),
+    c16 = sum(contig_16),
+    c17 = sum(contig_17),
+    c18 = sum(contig_18),
+    c19 = sum(contig_19),
+    c20 = sum(contig_20),
+    c21 = sum(contig_21),
+    c22 = sum(contig_22),
+    c23 = sum(contig_23),
+    c24 = sum(contig_24),
+    c25 = sum(contig_25),
+    c26 = sum(contig_26),
+    c27 = sum(contig_27),
+    c28 = sum(contig_28)
+    
+  )
+contig_otus = cgroups[match(unique(cgroups$seedling_id), cgroups$seedling_id),]
+```
+
+
+```{r}
+
+dist.contig = vegdist(contig_otus[,13:40], method= "bray", binary=FALSE, diag=TRUE, upper=TRUE)
+set.seed(209)
+mds.contig <- metaMDS(dist.contig, distance = "bray", k=2, trymax = 1000)
+
+data.scores.contig <- as.data.frame(scores(mds.contig))
+
+nmds_contig = contig_otus %>% 
+  bind_cols(data.scores.contig %>% 
+              clean_names())
+ 
+```
+
+```{r}
+ggplot(nmds_contig, aes(x = nmds1, y = nmds2)) +
+  geom_point(aes(color = soil_type, shape = seedling_sp))
 ```
 
