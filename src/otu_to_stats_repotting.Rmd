@@ -45,7 +45,8 @@ funguild_filtered = funguilds_otu[match(unique(funguilds_otu$otu_full), funguild
 asv.tab <- read_csv(here('data','repotting_otu_table.csv')) # otu table output from DADA2 and DECIPHER
 asv.tab <- t(asv.tab)
 colnames(asv.tab) <- asv.tab[1,]
-asv.tab <- asv.tab[-1,] 
+asv.tab <- asv.tab[-1,]
+asv.tab <- asv.tab[1:106,] #remove control samples
 
 asv.tib = asv.tab %>%
   t() %>% 
@@ -436,7 +437,7 @@ ggplot(sap_root, aes(x= NMDS1, y= NMDS2)) +
   geom_point(aes(color = soil_type, shape = seedling_sp))
 ```
 
-```{r}
+```{r indicator spp, eval= FALSE}
 
 
 #otu.all.df = data.frame(otu.all)
@@ -474,7 +475,7 @@ sym.indic = multipatt(t(otu.sym.indic), nmds_sym.indic$group, control = how(nper
 summary(sym.indic)
 ```
 
-```{r}
+```{r, eval = FALSE}
 
 
 all.indic$cluster
@@ -484,19 +485,29 @@ all.indic.1$A
 summary(all.indic.1)
 ```
 
-
 ```{r}
-wetkm = kmeans(wetland, centers=3)
-groupskm = wetkm$cluster
+dist_matrix_all <- phyloseq::distance(phy_all, method = "bray")
 
-groups = c(rep(1, 17), rep(2, 14), rep(3,10))
-length(groups)
-dim(wetland)
-indval = multipatt(wetland, groups,control = how(nperm=999))
-
-class(groups)
+adonis(dist_matrix_all~nmds_all$soil_type+nmds_all$seedling_sp +nmds_all$height_cm+nmds_all$diameter_mm)
 ```
+
 ```{r}
-save.image(here("data", "miseqinfo_09122021.RData"))
+dist_matrix_sym <- phyloseq::distance(phy_sym, method = "bray")
+
+adonis(dist_matrix_sym~sample_data(phy_sym)$seedling_sp+sample_data(phy_sym)$soil_type+sample_data(phy_sym)$height_cm+sample_data(phy_sym)$diameter_mm)
+
+dist_matrix_ect <- phyloseq::distance(phy_ect, method = "bray")
+
+adonis(dist_matrix_ect~sample_data(phy_ect)$seedling_sp+sample_data(phy_ect)$soil_type+sample_data(phy_ect)$height_cm+sample_data(phy_ect)$diameter_mm)
+
+dist_matrix_sap <- phyloseq::distance(phy_sap, method = "bray")
+
+adonis(dist_matrix_sap~sample_data(phy_sap)$seedling_sp+sample_data(phy_sap)$soil_type+sample_data(phy_sap)$height_cm+sample_data(phy_sap)$diameter_mm)
+```
+
+
+
+```{r}
+#save.image(here("data", "miseqinfo_09122021.RData"))
 ```
 
