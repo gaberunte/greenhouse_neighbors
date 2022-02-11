@@ -1,0 +1,148 @@
+---
+title: "Sorted Desttips"
+author: "Gabe Runte"
+date: "1/10/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(phyloseq)
+library(metagenomeSeq)
+library(vegan)
+library(here)
+library(janitor)
+library(gridExtra)
+library(dada2)
+```
+
+```{r}
+
+tips.dec21 = read_csv(here("data", "desttips_inventoried.csv")) %>% 
+  mutate(set = "Dec21")
+tips.jan22 = read_csv(here("data", "desttips_inventoried_jan21.csv")) %>% 
+  mutate(set = "Jan22") 
+tips.feb22 = read_csv(here("data", "desttips_inventoried_feb22.csv")) %>% 
+  mutate(set = "Feb22") 
+
+tips.all = tips.feb22 %>%
+  bind_rows(tips.jan22) %>% 
+  bind_rows(tips.dec21) %>% 
+  group_by(newfile) %>% 
+  filter(percent_hq == max(percent_hq)) %>% 
+  filter(!duplicated(newfile))
+
+tips = tips.all %>% 
+  filter(blast_seq != "NaN", percent_hq>1) 
+
+seedlings = read_csv(here("data", "seedling_measurements.csv")) %>% 
+  clean_names() %>% 
+  dplyr::select(seedling_id, soil_type, seedling_sp) 
+
+seedlings.unique = seedlings[match( unique(seedlings$seedling_id), seedlings$seedling_id),]
+
+```
+
+```{r, eval = FALSE}
+unite.ref <- here("unite_db", "sh_general_release_s_10.05.2021/sh_general_release_dynamic_s_10.05.2021.fasta")
+
+tiptaxa = assignTaxonomy(tips$blast_seq, unite.ref, multithread = TRUE, tryRC = TRUE)
+
+tiptaxa.df = tibble(as.data.frame(tiptaxa)) %>% 
+  mutate(blast_seq = rownames(tiptaxa))
+
+assigned = tips %>% 
+  left_join(tiptaxa.df)
+
+write.csv(assigned, here("data", "sorted_sanger_master_feb22.csv"))
+```
+
+```{r}
+master = read_csv(here("data", "sorted_sanger_master_feb22.csv")) %>% 
+  dplyr::select(!...1) %>% 
+  clean_names()
+
+forfunguild = master %>% 
+  mutate(taxonomy = paste(kingdom, phylum, class, order, family, genus, species, sep = ";")) %>% 
+  dplyr::select(newfile, taxonomy)
+write_csv(forfunguild, here("data", "desttips_ff_feb22.csv"))
+
+guilds = read_csv(here("data", "desttips_ff_feb22.guilds.csv"))
+
+master.guilds = master %>% 
+  left_join(guilds) %>% 
+  clean_names() %>% 
+  rowwise() 
+
+only.sym = master.guilds%>% 
+  filter("Symbiotroph" %in% trophic_mode)
+
+
+to.family = master.guilds %>% 
+  filter(!is.na(family)) 
+
+ectos = master.guilds %>% 
+  filter(guild == "Ectomycorrhizal")
+
+how.many = master.guilds %>% 
+  filter(!is.na(soil_type)) %>% 
+  group_by(soil_type, seedling_sp, guild) %>% 
+  summarize(n = n()) %>%
+  ungroup()
+
+``` 
+
+
+```{r}
+#destructive seedlings
+harvested = read_csv(here("data", "ghecto_repotting_dry_biomass.csv")) %>% 
+  left_join(seedlings.unique) 
+
+#all root tips pulled
+pulled_tips = read_csv(here("data", "ghecto_repotting_root_pulling_data.csv")) %>% 
+  mutate(pct_colonization = colonization_numerator/ colonization_denominator)
+tips_longer = pulled_tips %>% 
+  pivot_longer(cols=6:13, names_to = "row", values_to = "morphotype") %>% 
+  mutate(m_2nd = substr(morphotype, 2,2)) %>% 
+  mutate(morphotype = substr(morphotype, 1,1)) %>%
+  mutate(questionable = case_when(
+    morphotype == "Q" ~ 1,
+    m_2nd == "Q" ~ 1)) %>% 
+  mutate(questionable = case_when(
+    questionable == 1 ~ 1,
+    is.na(questionable) ~ 0)) %>% 
+  select(-m_2nd) %>% 
+  mutate(plate_short = as.numeric(substr(plate, 5,6)))
+
+#getting treatment info on every seedling
+seedlings = read_csv(here("data", "seedling_measurements.csv"))
+seedling.treatments = seedlings %>% 
+  select(1:3) %>% 
+  clean_names() 
+#pull uniques from multiple measurement file
+seedling.treatments = seedling.treatments[match(unique(seedlings$seedling_id), seedlings$seedling_id),]
+
+harvested_tips = tips_longer %>%
+  filter(seedling_id %in% harvested$seedling_id)
+  
+
+destructive_tips = harvested_tips %>% 
+  left_join(seedling.treatments)
+
+master.done = master %>% 
+  mutate(row = substr(newfile, 5,5)) %>% 
+  mutate(row= toupper(row)) %>% 
+  select(seedling_id, row, newfile)
+
+to.do = destructive_tips %>% 
+  left_join(master.done) %>% 
+  filter(is.na(newfile)) %>% 
+  select(seedling_id, plate, row, column, seedling_sp, soil_type )
+
+#write_csv(to.do, here("data", "nextup_sanger_jan2022.csv"))
+  
+```
+
+

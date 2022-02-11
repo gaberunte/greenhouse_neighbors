@@ -1,0 +1,183 @@
+---
+title: "Untitled"
+author: "Gabe Runte"
+date: "1/4/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(ape)
+library(reshape2)
+library(phangorn)
+library(stringi)
+library(stringr)
+library(DECIPHER)
+library(Biostrings)
+library(sangerseqR)
+library(here)
+library(devtools)
+library(sangeranalyseR) 
+library(tidyverse)
+```
+#pipeline adapted from https://rstudio-pubs-static.s3.amazonaws.com/421644_f379bb41084b4b9da91972ecfa9a2109.html
+
+```{r}
+path = here("desttips_ab1")
+files = list.files(path)
+
+
+scrpt = tibble(filename = files) %>% 
+  mutate(sanger = map(filename, ~ readsangerseq(file.path(path, .x)))) %>% 
+  mutate(abif = map(filename, ~ read.abif(file.path(path, .x)))) %>% 
+  mutate(mott.trims = map(abif, ~ trim.mott(.x, cutoff = 0.0001))) %>% 
+  mutate(untrimmed = map(abif, ~.x@data$PBAS.2))
+
+scrpt = scrpt %>% 
+  mutate(untrimmed = unnest(untrimmed))
+  mutate(trimmed = map(mott.trims, ~substring(untrimmed, .x$start, .x$finish)))
+  
+scrpt$untrimmed
+```
+
+```{r for chromatograms, eval = FALSE}
+chromatogram(readsangerseq(here("desttips_ab1", files[1])), trim5 = 0, trim3 = 0, showcalls = c("primary","secondary", "both", "none"), width = 100, height = NA, cex.mtext = 1,
+             cex.base = 1, ylim = 2, filename = NULL, showtrim = FALSE, showhets = TRUE)
+
+```
+
+
+
+```{r}
+#now we go back to sangeranalyzeR package
+#this will use seq.abif as input which was imported using read.abif 
+#trim low quality bases from your reads using Motts modified trimming algorithm
+trims=trim.mott(seq.abif)
+trims
+
+#you can control severity of trimming by using  cut-off argument. Samller number indicate more severe cutoff 
+#eg. using a cutoff of 0.1 will trim fewer low quality bases than cut off of 0.0001
+
+trims = trim.mott(seq.abif, cutoff = 0.0001)
+trims
+
+
+#compare between trimmed and untrimmed sequence 
+
+seq.untrimmed = seq.abif@data$PBAS.2
+seq.trimmed = substring(seq.untrimmed, trims$start, trims$finish)
+seq.untrimmed
+seq.trimmed
+
+
+
+
+#call secondary peaks 
+#a ration of 0.33 is used for calling secondary peaks 
+#to get secondary peaks the sequence has to be in sanger format
+seq.sanger = sangerseq(seq.abif)
+
+sp = secondary.peaks(seq.sanger)
+sp$secondary.peaks
+sp$read
+
+
+
+#exporting secondary basecalls with chromatogram in pdf format and excel format
+#blue bars represent positions of secondary peaks 
+#upper line represents primary base calls 
+#second line represents secondary base calls 
+#sp = secondary.peaks(seq.sanger, output.folder = "C:/Users/lokra_000/Desktop/sanger", file.prefix = "test")
+
+
+#generate a detail summary of your sequence
+sa = summarise.abi.file(seq.abif)
+sa$summary
+
+
+
+
+#merging reads into sequences this uses function from sangerseqR
+fwd=readsangerseq("forward.ab1")
+rev=readsangerseq("reverse.ab1")
+
+#now convert them to the format that is reognized by sangeanlyzeR package 
+fwd = primarySeq(fwd)
+rev = primarySeq(rev)
+
+# don't forget to reverse complement
+rev = reverseComplement(rev)
+
+
+
+# this gives us an unaligned set of the reads we wish to merge
+#this package has initally some error with paste function 
+#so I has to download all the packages from the github and change the codes and run function on my console and then it worked
+#I found if you tweak the function (paste(del.gaps(consensus) to (paste(as.matrix(del.gaps(consensus))
+#in both merge.reads() and summarise.merged.read(), 
+#the make.consensus.seqs() should be working; at least in my case
+#all the functions are on my Rpubs page (in one page so easy to copy.) http://www.rpubs.com/lokraj/sanger
+reads = DNAStringSet(c(as.character(fwd), as.character(rev)))
+names(reads) = c('fwd', 'rev')
+
+merged.reads = merge.reads(reads)
+names(merged.reads)
+merged.reads
+
+#how to get consensus sequence of the merged reads
+merged.reads$consensus
+
+
+
+#Another thing you might be interested in is looking at an alignment of your merged reads and the consensus sequence. 
+#The alignment is stored in merged.reads$alignment, 
+#and you can view it using the BrowseSeqs() function from the DECIPHER package like this
+BrowseSeqs(merged.reads$alignment)
+
+
+
+
+
+
+#these steps are many. this package makes easier by mekaing read set
+
+# this time we just make lists of filenames
+
+
+
+
+
+#make readset. 
+rs = make.readset(fwd)
+rs$readset
+
+
+#You can control how the trimming works when building readsets, by passing additional arguments to make.readset, e.g.:
+# we can make a readset without trimming the reads
+#>rs.untrimmed = make.readset(fwd, rev, trim = FALSE)
+# or we can trim the reads more conservatively than the default
+#>rs.trimmed = make.readset(fwd, rev, trim.cutoff = 0.000001)
+#by default make.readset removes low quality bases. so you can use default too.
+#there are other options that you can check on the github site  
+
+
+#summary of the files 
+rs$read.summaries
+
+
+#Having made our readset, it's just one line to make our consensus sequeunce. We can then view the consensus alignment.
+merged.reads = merge.reads(rs$readset)
+merged.reads
+BrowseSeqs(merged.reads$alignment)
+
+
+#exporting data 
+write.dna(merged.reads, file = "C:/Users/lokra_000/Desktop/sanger/consensus_sequences.fasta", format = 'fasta', nbcol = -1, colsep = "", colw = 10000000)
+
+
+
+```
+

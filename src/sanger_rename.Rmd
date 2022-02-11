@@ -1,0 +1,113 @@
+---
+title: "Rename sangers"
+author: "Gabe Runte"
+date: "1/9/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(here)
+library(tidyverse)
+library(janitor)
+```
+
+```{r}
+path = file.path(here("desttips_scf_raw", "feb22"))
+files = list.files(path)
+```
+
+
+```{r}
+rename.df = tibble(files) %>% 
+  mutate(plate_short= as.numeric(substr(files, 2,3)))%>% 
+  mutate(column= as.numeric(substr(files, 5,6)))%>% 
+  mutate(row= substr(files, 7,7)) %>% 
+  mutate(row = tolower(row))
+
+
+```
+
+
+```{r}
+tips = read_csv(here("data", "ghecto_repotting_root_pulling_data.csv")) %>% 
+  mutate(pct_colonization = colonization_numerator/ colonization_denominator)
+
+
+tips_longer = tips %>% 
+  pivot_longer(cols=6:13, names_to = "row", values_to = "morphotype") %>% 
+  mutate(m_2nd = substr(morphotype, 2,2)) %>% 
+  mutate(morphotype = substr(morphotype, 1,1)) %>%
+  mutate(questionable = case_when(
+    morphotype == "Q" ~ 1,
+    m_2nd == "Q" ~ 1)) %>% 
+  mutate(questionable = case_when(
+    questionable == 1 ~ 1,
+    is.na(questionable) ~ 0)) %>% 
+  select(-m_2nd) %>% 
+  mutate(plate_short = as.numeric(substr(plate, 5,6))) %>% 
+  mutate(row = tolower(row))
+
+
+```
+
+```{r}
+rename_wide = rename.df %>% 
+  left_join(tips_longer)
+
+treatments = read_csv(here("data", "seedling_measurements.csv")) %>% 
+  clean_names() %>% 
+  filter(timepoint == 1) %>% 
+  select(seedling_id, seedling_sp, soil_type)
+
+rename_total = rename_wide %>% 
+  left_join(treatments) %>% 
+  mutate(newfile = paste(seedling_id, row, "_", seedling_sp, soil_type,".scf", sep = "")) %>% 
+  filter(!duplicated(files))
+
+
+```
+
+```{r, eval=FALSE}
+
+for(i in 1:length(rename_total$files)){
+
+if (file.exists(here("desttips_scf_raw", "feb22", rename_total$files[i]))) {
+
+ file.rename(here("desttips_scf_raw", "feb22", rename_total$files[i]), here("desttips_scf", rename_total$newfile[i]))
+
+} 
+}
+
+```
+
+```{r}
+tracking_sheet = rename_total %>% 
+  relocate(newfile) %>% 
+  select(newfile, morphotype, seedling_id, seedling_sp, soil_type) 
+
+
+```
+
+```{r}
+read_qual = read_csv(here("data", "geneious_desttips_scf_feb22.csv")) %>% 
+  clean_names() %>% 
+  rename(newfile = name)
+
+everything = tracking_sheet%>% 
+  right_join(read_qual)%>% 
+  mutate(percent_hq = as.numeric(str_sub(percent_hq,1, nchar(percent_hq)-1)))%>% 
+  mutate(percent_lq = as.numeric(str_sub(percent_lq,1, nchar(percent_lq)-1)))%>% 
+  mutate(percent_mq = as.numeric(str_sub(percent_mq,1, nchar(percent_mq)-1))) %>% 
+  mutate(analyze = as.numeric(percent_hq>5)) %>% 
+  relocate(analyze, .before = morphotype)
+
+for_tracking = everything %>% 
+  select(newfile, analyze, morphotype, seedling_id, seedling_sp, soil_type, percent_hq, percent_lq)
+
+
+write.csv(for_tracking, here("data", "dest_morphotype_check_feb22.csv"))
+```
+
+

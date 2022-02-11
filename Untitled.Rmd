@@ -1,0 +1,220 @@
+---
+title: "SangerUpdates"
+author: "Gabe Runte"
+date: "10/27/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#library(metagenomeSeq)
+#library(lubridate)
+#library(calecopal)
+#library(ape)
+#library(bioseq)
+#library(dada2)
+#library(matrixStats)
+```
+
+
+```{r setup}
+library(here)
+library(janitor)
+library(vegan)
+library(tidyverse)
+library(bioseq)
+library(phyloseq)
+library(kmer)
+
+```
+
+```{r, message= FALSE}
+#size = read_csv(here("data", "ghecto_pilot_sizemetrics.csv"))%>% 
+#  clean_names()
+size= read_csv(here("data", "ghecto_repotting_seedling_data.csv")) %>% 
+  clean_names()
+biomass = read_csv(here("data", "ghecto_pilot_biomass.csv"))%>% 
+  clean_names()
+community = read_csv(here("data", "seedling_measurements.csv")) %>% 
+  clean_names()
+
+destructive.fasta = here("data", "tip_seqs", "destructive", "scf_trimmed.fasta")
+
+destructive.dnabin = ape::read.dna(destructive.fasta, format= "fasta")
+
+destructive.otus = otu(destructive.dnabin)
+destructive.tibble = as_tibble.DNAbin(destructive.dnabin)
+destructive.tibble = destructive.tibble %>% 
+  mutate(otu = destructive.otus) %>% 
+  mutate(plate_location = substr(label, 1, 7)) %>% 
+  relocate(plate_location)
+
+for(i in 1:length(destructive.tibble[,1])){
+  if(substr(destructive.tibble$for.central[i], nchar(destructive.tibble$for.central[i]), nchar(destructive.tibble$for.central[i])) == "*"){destructive.tibble$is.center[i] <- 1} else{destructive.tibble$is.center[i] <- 0}
+}
+```
+
+```{r}
+#unite.seqs = destructive.tibble %>% 
+ # filter(is.center == "TRUE") %>% 
+#  arrange(otu)
+
+#unite.ref <- "/Volumes/Gabe_Runte_EHD/unite_db/sh_general_release_s_04.02.2020/sh_general_release_dynamic_s_04.02.2020.fasta"
+#destructive.seqs <- as.vector(unite.seqs$sequence)
+#destructive.taxonomy <- assignTaxonomy(destructive.seqs, unite.ref, multithread = TRUE, tryRC = TRUE)
+#write.csv(destructive.taxonomy, here("data", "unite_sedgwick_otus.csv"))
+#destructive.taxonomy$sequence <- rownames(destructive.taxonomy)
+
+taxa.tib = read_csv(here("data", "unite_sedgwick_otus.csv")) %>% 
+  mutate(otu = seq(1:length(taxa.tib$X1))) %>% 
+  rename(otu_seq = X1)
+
+destructive.all = destructive.tibble %>% 
+  left_join(taxa.tib) %>%
+  separate(label, c("plate", "column", "row")) %>% 
+  mutate(row.num = case_when(
+    row == "a" ~ "1",
+    row == "b" ~ "2",
+    row == "c" ~ "3",
+    row == "d" ~ "4",
+    row == "e" ~ "5",
+    row == "f" ~ "6",
+    row == "g" ~ "7",
+    row == "h" ~ "8"
+  )) %>% 
+  mutate(column.long = NaN) %>% 
+  mutate(column = as.numeric(column)) %>% 
+  mutate(row.num = as.numeric(row.num))
+
+for(i in 1:length(destructive.all$plate)){
+  if(destructive.all$plate[i] == "1")
+  {destructive.all$column.long[i]<- destructive.all$column[i]}
+  else{if(destructive.all$plate[i]=="2")
+  {destructive.all$column.long[i] <- (destructive.all$column[i]+12)}
+    else{destructive.all$column.long[i] <- (destructive.all$column[i]+24)}}
+  
+}
+
+
+taxa.mat = matrix(rep(NaN, 8*36), nrow=36, ncol=8)
+#taxa.mat[2] = 2
+
+for(i in 1:length(destructive.all$row.num)){
+  taxa.mat[destructive.all$column.long[i], destructive.all$row.num[i]] = destructive.all$otu[i]
+}
+
+
+```
+
+```{r setup by root tip}
+community= community[1:1438,]
+community.subset = community %>% 
+  select(seedling_id, seedling_sp, soil_type) %>% 
+  rename(id = seedling_id) %>% 
+  filter(id %in% size$id)
+taxa.mat.tib = tibble(as.data.frame(taxa.mat)) %>% 
+  mutate(plate= c(rep(1, 12), rep(2, 12), rep(3, 12))) %>% 
+  mutate(row= rep(1:12,3))
+size.tax = size %>% 
+  separate(plate_position, c("plate", "row")) %>% 
+  filter(plate != "na") %>% 
+  mutate(plate = as.numeric(plate)) %>% 
+  mutate(row = as.integer(row)) %>% 
+  left_join(community.subset) %>% 
+  left_join(taxa.mat.tib)
+```
+
+
+```{r otu table crafting}
+mat.for.otu = as.matrix(size.tax[,9:16])
+mat.for.otu[is.nan(mat.for.otu)]<-0
+
+otu.matrix = matrix(rep(NaN, (69*29)), nrow= 29, ncol= 69)
+for(i in 1:ncol(otu.matrix)){
+ otu.matrix[,i] <- rowCounts(mat.for.otu, value = i)
+}
+otu.tibble = tibble(as.data.frame(otu.matrix))
+
+destructive.otu.table = size.tax %>% 
+  select(1:8) %>% 
+  bind_cols(otu.tibble)
+
+otu.nmds = metaMDS(otu.tibble, distance = "bray", k=2) 
+otu.fig.tib = tibble(as.data.frame(scores(otu.nmds)))
+
+destructive.otu.table = mutate(destructive.otu.table, nmds1 = otu.fig.tib$NMDS1, nmds2 = otu.fig.tib$NMDS2)
+
+
+ggplot(destructive.otu.table, aes(nmds1, nmds2,  shape= soil_type, color=seedling_sp)) + 
+  geom_point(aes(size= diameter_mm)) +
+  geom_jitter()+
+  ylim(15,25)+
+  xlim(-100,-80)
+```
+
+```{r}
+taxa.tib.filtered = taxa.tib %>% 
+  filter( !is.na(Class))
+
+taxa.tib.reverse.filtered = taxa.tib %>% 
+  filter(is.na(Class))
+
+remove.these = which(seq(1,69) %in%  taxa.tib.reverse.filtered$otu)
+
+otu.matrix.filtered = otu.matrix[,-remove.these]
+dim(otu.matrix.filtered)
+
+otu.filtered.tib = tibble(as.data.frame(otu.matrix.filtered))
+  colnames(otu.filtered.tib)=paste("otu", taxa.tib.filtered$otu, sep = "")
+otu.filtered.tib = otu.filtered.tib %>% 
+   mutate(otu44 = otu44+otu57,
+          otu6 = otu6+otu7+otu8+otu9+otu35+otu36,
+          otu14 = otu14+otu15+otu16+otu17+otu18,
+          otu41 = otu41+otu62+otu63,
+          otu3 = otu3+otu56+otu64,
+          otu67 = otu67+otu68) %>% 
+   select(-c(otu57, 
+             otu7, otu8, otu9, otu35, otu36,
+             otu15, otu16, otu17, otu18,
+             otu62, otu63,
+             otu56, otu64,
+             otu68))
+otu.filtered.tib = otu.filtered.tib[-c(1,12),]
+
+
+destructive.otu.table.filtered = size.tax %>% 
+  select(1:8) 
+destructive.otu.table.filtered = destructive.otu.table.filtered[-c(1,12),]
+destructive.otu.table.filtered = destructive.otu.table.filtered %>% 
+  bind_cols(otu.filtered.tib)
+
+otu.nmds.filtered = metaMDS(otu.filtered.tib, distance = "bray", k=2) 
+otu.fig.tib.filtered = tibble(as.data.frame(scores(otu.nmds.filtered)))
+
+destructive.otu.table.filtered = mutate(destructive.otu.table.filtered, nmds1 = otu.fig.tib.filtered$NMDS1, nmds2 = otu.fig.tib.filtered$NMDS2)
+
+
+ggplot(destructive.otu.table.filtered, aes(nmds1, nmds2,  shape= soil_type, color=seedling_sp)) + 
+  geom_point(aes(size= diameter_mm)) +
+  geom_jitter()+
+  ylim(-5,-7.5)+
+  xlim(-28,-18)
+```
+
+```{r}
+oaks.otu = destructive.otu.table.filtered %>% 
+  filter(seedling_sp == "Q")
+
+colSums(as.matrix(oaks.otu[,9:30]))
+rowSums(as.matrix(oaks.otu[,9:30]))
+
+
+bigcone.otu = destructive.otu.table.filtered %>% 
+  filter(seedling_sp == "P")
+colSums(as.matrix(bigcone.otu[,9:30]))
+rowSums(as.matrix(bigcone.otu[,9:30]))
+```
+

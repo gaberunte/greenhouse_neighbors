@@ -1,0 +1,224 @@
+---
+title: "Tip sequences"
+author: "Gabe Runte"
+date: "12/9/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(phyloseq)
+library(metagenomeSeq)
+library(vegan)
+library(here)
+library(janitor)
+library(gridExtra)
+library(indicspecies)
+library(dada2)
+```
+
+```{r, message=FALSE}
+tip_seqs = read_csv(here("data", "repotting_dest_contigs.csv")) %>% 
+  clean_names() %>% 
+  select(name, post_trim_length, sequence, sequence_list_name) %>% 
+  mutate(plate_short = as.numeric(substr(name, 2, 3)))%>% 
+  mutate(column = as.numeric(substr(name, 5, 6)))%>% 
+  mutate(row = substr(name, 7,7)) %>% 
+  mutate(contig.num = as.numeric(substr(sequence_list_name, 8,9)))
+contig_seqs = tip_seqs %>% 
+  filter( !is.na(sequence_list_name))
+
+tips = read_csv(here("data", "ghecto_repotting_root_pulling_data.csv")) %>% 
+  mutate(pct_colonization = colonization_numerator/ colonization_denominator)
+tips_longer = tips %>% 
+  pivot_longer(cols=6:13, names_to = "row", values_to = "morphotype") %>% 
+  mutate(m_2nd = substr(morphotype, 2,2)) %>% 
+  mutate(morphotype = substr(morphotype, 1,1)) %>%
+  mutate(questionable = case_when(
+    morphotype == "Q" ~ 1,
+    m_2nd == "Q" ~ 1)) %>% 
+  mutate(questionable = case_when(
+    questionable == 1 ~ 1,
+    is.na(questionable) ~ 0)) %>% 
+  select(-m_2nd) %>% 
+  mutate(plate_short = as.numeric(substr(plate, 5,6)))
+
+tip_ids = tips_longer %>% 
+  filter(!is.na(morphotype)) 
+
+seedlings = read_csv(here("data", "seedling_measurements.csv")) %>% 
+  clean_names() %>% 
+  select(seedling_id, soil_type, seedling_sp)
+
+tips.master = tips_longer %>% 
+  left_join(seedlings) %>% 
+  mutate(row = tolower(row))
+
+contig.master =contig_seqs %>% 
+  left_join(tips.master)
+
+seedling_size = read_csv(here("data", "ghecto_repotting_seedling_data.csv")) %>% 
+  select(!notes)
+```
+
+```{r, eval = FALSE}
+
+
+unite.ref <- "/Volumes/Gabe_Runte_EHD/unite_db/sh_general_release_s_10.05.2021/sh_general_release_dynamic_s_10.05.2021.fasta"
+
+tiptaxa = assignTaxonomy(contig.master$sequence, unite.ref, multithread = TRUE, tryRC = TRUE)
+
+write.csv(tiptaxa, here("data", "unite_dest_tips.csv"))
+```
+
+```{r}
+unite_tips = read_csv(here("data", "unite_dest_tips.csv"))
+
+contig.taxonomy = contig.master %>% 
+  bind_cols(unite_tips[,2:8])
+
+contig_wide = contig.taxonomy %>% 
+  mutate(count = 1) %>% 
+  pivot_wider(names_from = sequence_list_name,values_from = count, values_fn = mean, values_fill = 0) 
+
+contig_wider = contig_wide[match(unique(contig_wide$name), contig_wide$name),] %>% 
+  clean_names()
+```
+
+```{r}
+cgroups = contig_wider %>% 
+  group_by(seedling_id) %>% 
+  summarize(
+    soil_type = soil_type,
+    seedling_sp = seedling_sp,
+    colonization_numerator = colonization_numerator,
+    colonization_denominator = colonization_denominator,
+    kingdom = kingdom, 
+    phylum = phylum, 
+    class = class, 
+    order = order, 
+    family = family, 
+    genus = genus, 
+    species = species,
+    c01 = sum(contig_1),
+    c02 = sum(contig_2),
+    c03 = sum(contig_3),
+    c04 = sum(contig_4),
+    c05 = sum(contig_5),
+    c06 = sum(contig_6),
+    c07 = sum(contig_7),
+    c08 = sum(contig_8),
+    c09 = sum(contig_9),
+    c10 = sum(contig_10),
+    c11 = sum(contig_11),
+    c12 = sum(contig_12),
+    c13 = sum(contig_13),
+    c14 = sum(contig_14),
+    c15 = sum(contig_15),
+    c16 = sum(contig_16),
+    c17 = sum(contig_17),
+    c18 = sum(contig_18),
+    c19 = sum(contig_19),
+    c20 = sum(contig_20),
+    c21 = sum(contig_21),
+    c22 = sum(contig_22),
+    c23 = sum(contig_23),
+    c24 = sum(contig_24),
+    c25 = sum(contig_25),
+    c26 = sum(contig_26),
+    c27 = sum(contig_27),
+    c28 = sum(contig_28)
+    
+  )
+contig_otus = cgroups[match(unique(cgroups$seedling_id), cgroups$seedling_id),] %>% 
+  mutate(pct_colonization = colonization_numerator/colonization_denominator) %>% 
+  left_join(seedling_size)
+```
+```{r}
+pines = contig_otus %>% 
+  filter(seedling_sp == "P")
+
+oaks = contig_otus %>% 
+  filter(seedling_sp == "Q")
+
+dist.pines = vegdist(pines[,13:40], method= "bray", binary=FALSE, diag=TRUE, upper=TRUE)
+set.seed(209)
+adonis(dist.pines~pines$soil_type)
+
+
+dist.oaks = vegdist(oaks[,13:40], method= "bray", binary=FALSE, diag=TRUE, upper=TRUE)
+set.seed(209)
+adonis(dist.oaks~oaks$soil_type)
+
+```
+
+
+
+
+```{r}
+dist.contig = vegdist(contig_otus[,13:40], method= "bray", binary=FALSE, diag=TRUE, upper=TRUE)
+set.seed(209)
+adonis(dist.contig~contig_otus$soil_type*contig_otus$seedling_sp+contig_otus$pct_colonization+(contig_otus$height_cm*contig_otus$seedling_sp)+(contig_otus$diameter_mm*contig_otus$seedling_sp))
+
+adonis(dist.contig~contig_otus$seedling_sp*contig_otus$soil_type+contig_otus$pct_colonization+(contig_otus$height_cm*contig_otus$seedling_sp)+(contig_otus$diameter_mm*contig_otus$seedling_sp))
+```
+
+```{r}
+dist.contig = vegdist(contig_otus[,13:40], method= "euclidean", binary=FALSE, diag=TRUE, upper=TRUE)
+set.seed(209)
+adonis(dist.contig~contig_otus$soil_type*contig_otus$seedling_sp+contig_otus$pct_colonization+(contig_otus$height_cm*contig_otus$seedling_sp)+(contig_otus$diameter_mm*contig_otus$seedling_sp))
+
+adonis(dist.contig~contig_otus$seedling_sp*contig_otus$soil_type+contig_otus$pct_colonization+(contig_otus$height_cm*contig_otus$seedling_sp)+(contig_otus$diameter_mm*contig_otus$seedling_sp))
+```
+
+```{r}
+dist.contig = vegdist(contig_otus[,13:40], method= "jaccard", binary=FALSE, diag=TRUE, upper=TRUE)
+set.seed(209)
+adonis(dist.contig~contig_otus$soil_type*contig_otus$seedling_sp+contig_otus$pct_colonization+(contig_otus$height_cm*contig_otus$seedling_sp)+(contig_otus$diameter_mm*contig_otus$seedling_sp))
+
+adonis(dist.contig~contig_otus$seedling_sp*contig_otus$soil_type+contig_otus$pct_colonization+(contig_otus$height_cm*contig_otus$seedling_sp)+(contig_otus$diameter_mm*contig_otus$seedling_sp))
+```
+
+```{r}
+mds.contig <- metaMDS(contig_otus[,13:40], distance = "bray", k=2, trymax = 1000)
+
+data.scores.contig <- as.data.frame(scores(mds.contig))
+
+nmds_contig = contig_otus %>% 
+  bind_cols(data.scores.contig %>% 
+              clean_names())
+ 
+```
+
+```{r}
+ggplot(nmds_contig, aes(x = nmds1, y = nmds2)) +
+  geom_point(aes(color = soil_type, shape = seedling_sp)) 
+
+ggplot(nmds_contig, aes(x = nmds1, y = nmds2)) +
+  geom_point(aes(color = soil_type, shape = seedling_sp)) +
+  ylim(-30,-25)+
+  xlim(-125,-115)
+```
+
+
+
+```{r}
+
+contig_longer = contig_otus %>%
+  pivot_longer(13:40, names_to = "contig", values_to = "count") %>%
+  mutate(sp_long = case_when(
+    seedling_sp == "Q"~"oak",
+    seedling_sp == "P"~"pine"
+  )) %>% 
+  mutate(trt = paste(sp_long, soil_type, sep = "_"))
+
+ggplot(contig_longer, aes(fill = contig, y= count, x= trt))+ 
+    geom_bar(position="fill", stat="identity")
+
+ggplot(contig_longer, aes(fill = contig, y= count, x= as.factor(seedling_id))) + 
+    geom_bar(position="stack", stat="identity") +
+  facet_wrap(~trt)
+```
+
