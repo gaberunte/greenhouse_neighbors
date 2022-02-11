@@ -18,15 +18,18 @@ library(RColorBrewer)
 
 ```{r}
 #just before repotting
+#created object "data frame" class() tells what type data.frame, vector,or matrix 
+#here brings to top of proj folder, into data, look for this file
 seedling_size = read_csv(here("data", "ghecto_repotting_seedling_data.csv")) %>% 
   mutate(timepoint = "3")
+#create new varbiale t=3 in data set
 t3 = read_csv(here("data", "ghecto_repotting_seedling_data.csv")) %>% 
   mutate(timepoint = "3")
 
 #from the grow up in year 1 before repotting
-seedlings = read_csv(here("data", "seedling_measurements.csv")) %>%
-  clean_names()
+#created data frame through data folder and seedling measurement fil
 
+#
 seedlings = seedlings[(match(unique(seedlings$seedling_id), seedlings$seedling_id)),] %>% 
   select(seedling_id, seedling_sp, soil_type)
 
