@@ -180,7 +180,7 @@ uniquesToFasta(getUniques(seqtab.nochim), "uniques.fasta", ids=paste0("Seq", seq
 ```
 
 ```{r trying to change OTU threshold}
-nproc <- 4 # set to number of cpus/processors to use for the clustering
+nproc <- 10 # set to number of cpus/processors to use for the clustering
 
 asv_sequences <- colnames(seqtab.nochim)
 sample_names <- rownames(seqtab.nochim)

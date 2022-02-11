@@ -202,3 +202,23 @@ ggplot(nmds_contig, aes(x = nmds1, y = nmds2)) +
   xlim(-125,-115)
 ```
 
+
+
+```{r}
+
+contig_longer = contig_otus %>%
+  pivot_longer(13:40, names_to = "contig", values_to = "count") %>%
+  mutate(sp_long = case_when(
+    seedling_sp == "Q"~"oak",
+    seedling_sp == "P"~"pine"
+  )) %>% 
+  mutate(trt = paste(sp_long, soil_type, sep = "_"))
+
+ggplot(contig_longer, aes(fill = contig, y= count, x= trt))+ 
+    geom_bar(position="fill", stat="identity")
+
+ggplot(contig_longer, aes(fill = contig, y= count, x= as.factor(seedling_id))) + 
+    geom_bar(position="stack", stat="identity") +
+  facet_wrap(~trt)
+```
+
