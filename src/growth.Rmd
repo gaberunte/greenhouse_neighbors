@@ -838,3 +838,9 @@ lmo2$call
 bestlmo = lm(formula = growth ~ 1, data = m5.oak)
 anova(bestlmo)
 ```
+```{r}
+seedling.measurements.april2022= read.csv(here("Data", "measurements april 2022.csv"))%>%
+  clean_names()
+            
+```
+
