@@ -262,3 +262,65 @@ colSums(as.matrix(bigcone.otu[,9:30]))
 rowSums(as.matrix(bigcone.otu[,9:30]))
 ```
 
+```{r}
+tips_consensus = read_csv(here("data", "tip_seqs","destructive", "june_22_consensus.csv")) %>%
+  clean_names() %>% 
+  dplyr::select(name, sequence) %>% 
+  rename(sequence_list_name = name)
+
+dest_tips = read_csv(here("data", "tip_seqs","destructive", "june_22_contigs.csv")) %>% 
+  clean_names() %>% 
+  separate(name, c("plate", "plate_numbers", "location")) %>% 
+  mutate(plate_number = paste(plate, plate_numbers, sep = "-")) %>%
+  relocate(plate_number) %>% 
+  dplyr::select(-plate, -plate_numbers) %>% 
+  left_join(tips_consensus) %>% 
+  mutate(plate_number = substr(plate_number, 7,8)) %>% 
+  mutate(column = gsub("[^0-9.-]","",location)) %>% 
+  mutate(row = gsub("[[:digit:]]","",location))
+  
+
+  
+master_contigs = read.csv(here("data", "tipstosequence_may2022.csv")) %>% 
+  clean_names()
+
+sample_locations = read_csv(here("data", "tips_plate30_31_32.csv"))
+
+sanger_sheet = master_contigs %>% 
+  left_join(sample_locations) %>%
+  mutate(newplate = substr(newplate, 5, 6)) %>%
+  select(-pcr_plate, -pcr_column, -pcr_row, -x)
+```
+```
+```{r}
+unite.ref = (here("downsh_general_release_dynamic_s_10.05.2021.fasta
+
+
+
+tiptaxa = assignTaxonomy(sanger_sheet$sequence, unite.ref, multithread = TRUE, tryRC = TRUE)
+
+dest_tiptaxa = tibble(as.data.frame(tiptaxa)) %>%
+mutate(plate = sanger_sheet$plate) %>%
+mutate(column = sanger_sheet$column) %>%
+mutate(row = sanger_sheet$row)
+
+write_csv(dest_tiptaxa, here("data", "dest_tiptaxa_contigs1.csv"))
+
+
+
+``{r}
+
+ sos_tiptaxa = read_csv(here("data", "sos_tiptaxa_sanger_contigs1.csv"))
+
+morph = sanger_sheet %>% 
+               dplyr::select(sequence, sos_core_id, plate_number, column, row, morphotype) %>% 
+  left_join(sos_tiptaxa) %>% 
+  left_join(sanger_sheet %>% 
+              dplyr::select(!core_id)) 
+
+#write_csv(morph, here("data", "sos_contig_morphotyping1.csv"))
+```
+
+
+```
+
