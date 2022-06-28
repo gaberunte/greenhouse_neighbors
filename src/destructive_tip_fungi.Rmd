@@ -293,7 +293,7 @@ sanger_sheet = master_contigs %>%
 ```
 ```
 ```{r}
-unite.ref = (here("downsh_general_release_dynamic_s_10.05.2021.fasta
+unite.ref = (here("unite_db", "sh_general_release_dynamic_s_10.05.2021.fasta"))
 
 
 
@@ -307,8 +307,9 @@ mutate(row = sanger_sheet$row)
 write_csv(dest_tiptaxa, here("data", "dest_tiptaxa_contigs1.csv"))
 
 
+```
 
-``{r}
+```{r}
 
  sos_tiptaxa = read_csv(here("data", "sos_tiptaxa_sanger_contigs1.csv"))
 
@@ -322,5 +323,4 @@ morph = sanger_sheet %>%
 ```
 
 
-```
 
