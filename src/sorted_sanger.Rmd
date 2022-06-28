@@ -56,7 +56,7 @@ tiptaxa.df = tibble(as.data.frame(tiptaxa)) %>%
 assigned = tips %>% 
   left_join(tiptaxa.df)
 
-write.csv(assigned, here("data", "sorted_sanger_master_feb22.csv"))
+#write.csv(assigned, here("data", "sorted_sanger_master_feb22.csv"))
 ```
 
 ```{r}
@@ -91,6 +91,11 @@ how.many = master.guilds %>%
   group_by(soil_type, seedling_sp, guild) %>% 
   summarize(n = n()) %>%
   ungroup()
+
+  
+ggplot(ectos, aes(x=as.factor(seedling_id), fill = taxon_2)) +
+    geom_bar(position= "stack") +
+  facet_grid(rows = vars(seedling_sp), cols = vars(soil_type))
 
 ``` 
 
@@ -145,4 +150,28 @@ to.do = destructive_tips %>%
   
 ```
 
+```{r}
+low.q = master %>% 
+  filter(percent_hq <2)
+
+no.genus = master %>% 
+  filter(percent_hq >=2)
+  filter(is.na(genus))
+
+
+  
+nextup = bind_rows(low.q, no.genus)
+
+newlocs = tibble(
+  seedling_id = as.numeric(substr(nextup$newfile, 1,4)),
+  row = substr(nextup$newfile, 5,5)) %>% 
+    left_join(seedling.treatments) %>% 
+  left_join(pulled_tips %>% 
+              select(seedling_id, plate, column)) %>% 
+  arrange(plate, column, row)
+
+
+#write_csv(newlocs, here("data", "tipstosequence_may2022.csv"))
+
+```
 

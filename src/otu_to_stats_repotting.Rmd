@@ -403,14 +403,138 @@ ggplot(all_root, aes(x= NMDS1, y= NMDS2)) +
 
 
 ```{r}
-ggplot(nmds_sym, aes(x= NMDS1, y= NMDS2)) + 
-  geom_point(aes(color = soil_type, shape = seedling_sp))
+ggplot(nmds_sym, aes(x= NMDS1, y= NMDS2,color = soil_type)) + 
+  geom_point(aes( shape = seedling_sp)) +
+  lims(x= c(-.3, .3))+
+  stat_ellipse() +
+  scale_color_manual(
+    values = c("darkseagreen4", "darkgoldenrod2", "cadetblue3" ), name = "Soil Type",
+    breaks = c("P", "Q", "C"), labels = c("Bigcone", "Canyon Oak", "Control")
+  ) +
+  scale_shape_manual(name = "Seedling Species", breaks= c("P", "Q"), labels = c("Bigcone", "Canyon Oak"), values = c(17,15))+
+  theme_minimal()
+
+#ggsave(here("figures", "nmds_repotting_sym.pdf"))
+
+ggplot(nmds_sym, aes(x= NMDS1, y= NMDS2,color = seedling_sp)) + 
+  geom_point(aes( shape = soil_type)) +
+  lims(x= c(-.3, .3))+
+  scale_color_manual(name = "Seedling Species", breaks= c("P", "Q"), labels = c("Bigcone", "Canyon Oak"), values = c("darkseagreen4", "darkgoldenrod2")) +
+  stat_ellipse()+
+  scale_shape_manual(
+    values = c(15, 17, 19), name = "Soil Type",
+    breaks = c("P", "Q", "C"), labels = c("Bigcone", "Canyon Oak", "Control")) +
+    theme_minimal()
+#ggsave(here("figures", "nmds_repotting_sym_alternate.pdf"))
 
 ggplot(sym_soil, aes(x= NMDS1, y= NMDS2)) + 
   geom_point(aes(color = soil_type, shape = seedling_sp))
 
 ggplot(sym_root, aes(x= NMDS1, y= NMDS2)) + 
   geom_point(aes(color = soil_type, shape = seedling_sp))
+```
+
+```{r}
+ggplot(nmds_sym %>% 
+         filter(seedling_sp =="Q"), aes(x= NMDS1, y= NMDS2,color = soil_type)) + 
+  geom_point(aes()) +
+  lims(x= c(-.3, .3))+
+  stat_ellipse()+
+  scale_color_manual(
+    values = c("darkseagreen4", "darkgoldenrod2", "cadetblue3" ), name = "Soil Type",
+    breaks = c("P", "Q", "C"), labels = c("Bigcone", "Canyon Oak", "Control")
+  )+
+  theme_minimal()+
+  labs(title = "Canyon Oak Dissimilarity")
+#ggsave(here("figures", "nmds_repotting_sym_oaks.pdf"))
+ggplot(nmds_sym %>% 
+         filter(seedling_sp =="P"), aes(x= NMDS1, y= NMDS2,color = soil_type)) + 
+  geom_point(aes()) +
+  lims(x= c(-.3, .3))+
+  stat_ellipse()+
+  scale_color_manual(
+    values = c("darkseagreen4", "darkgoldenrod2", "cadetblue3" ), name = "Soil Type",
+    breaks = c("P", "Q", "C"), labels = c("Bigcone", "Canyon Oak", "Control")
+  )+
+  theme_minimal()+
+  labs(title = "Bigcone Dissimilarity")
+#ggsave(here("figures", "nmds_repotting_sym_bigcone.pdf"))
+```
+
+```{r}
+ggplot(nmds_sym %>% 
+         filter(soil_type =="Q"), aes(x= NMDS1, y= NMDS2,color = seedling_sp)) + 
+  geom_point(aes()) +
+  lims(x= c(-.3, .3))+
+  stat_ellipse()+
+  scale_color_manual(
+    values = c("darkseagreen4", "darkgoldenrod2"), name = "Seedling Species",
+    breaks = c("P", "Q"), labels = c("Bigcone", "Canyon Oak")
+  )+
+  theme_minimal()+
+  labs(title = "Oak Soil Dissimilarity")
+
+#ggsave(here("figures", "nmds_repotting_sym_oaksoil.pdf"))
+
+ggplot(nmds_sym %>% 
+         filter(soil_type =="P"), aes(x= NMDS1, y= NMDS2,color = seedling_sp)) + 
+  geom_point(aes()) +
+  lims(x= c(-.3, .3))+
+  stat_ellipse()+
+  scale_color_manual(
+    values = c("darkseagreen4", "darkgoldenrod2"), name = "Seedling Species",
+    breaks = c("P", "Q"), labels = c("Bigcone", "Canyon Oak")
+  )+
+  theme_minimal()+
+  labs(title = "Bigcone Soil Dissimilarity")
+#ggsave(here("figures", "nmds_repotting_sym_bigconesoil.pdf"))
+
+
+ggplot(nmds_sym %>% 
+         filter(soil_type =="C"), aes(x= NMDS1, y= NMDS2,color = seedling_sp)) + 
+  geom_point(aes()) +
+  lims(x= c(-.3, .3))+
+  stat_ellipse()+
+  scale_color_manual(
+    values = c("darkseagreen4", "darkgoldenrod2"), name = "Seedling Species",
+    breaks = c("P", "Q"), labels = c("Bigcone", "Canyon Oak")
+  )+
+  theme_minimal()+
+  labs(title = "Control Soil Dissimilarity")
+
+#ggsave(here("figures", "nmds_repotting_sym_controlsoil.pdf"))
+
+```
+
+
+```{r}
+asv.conf.sym.rs = asv.conf.sym[,1:106] %>% 
+  mutate_if(is.character,as.numeric)
+
+summat = as.matrix(asv.conf.sym.rs)/as.matrix(asv.conf.sym.rs) 
+summat[is.na(summat)] <- 0
+colSums(summat)
+
+nmds_sym  = nmds_sym%>%
+  mutate(richness = colSums(summat))
+
+ggplot(nmds_sym, aes(y=richness, x=seedling_sp,fill = soil_type ))+
+  geom_boxplot()
+
+
+asv.conf.ect.rs = asv.conf.ect[,1:106] %>% 
+  mutate_if(is.character,as.numeric)
+
+summat = as.matrix(asv.conf.ect.rs)/as.matrix(asv.conf.ect.rs) 
+summat[is.na(summat)] <- 0
+colSums(summat)
+
+nmds_ect  = nmds_ect%>%
+  mutate(richness = colSums(summat))
+
+ggplot(nmds_ect, aes(y=richness, x=seedling_sp,fill = soil_type ))+
+  geom_boxplot()
+
 ```
 
 

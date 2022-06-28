@@ -1,0 +1,64 @@
+---
+title: "Untitled"
+author: "Gabe Runte"
+date: "4/26/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(MASS)
+library(tidyverse)
+library(here)
+library(janitor)
+library(lubridate)
+library(RColorBrewer)
+```
+
+
+```{r}
+seedling_size = read_csv(here("data", "ghecto_repotting_seedling_data.csv")) %>% 
+  mutate(timepoint = "3")
+t3 = read_csv(here("data", "ghecto_repotting_seedling_data.csv")) %>% 
+  mutate(timepoint = "3")%>% 
+  mutate(month = lubridate::my(032021))
+
+#from the grow up in year 1 before repotting
+seedlings = read_csv(here("data", "seedling_measurements.csv")) %>%
+  clean_names()
+
+post_repotting = read_csv(here("data", "post_repotting_measurements.csv")) %>%
+  clean_names() %>% 
+  mutate(timepoint = "4")
+
+t4 = post_repotting %>% 
+  mutate(month = lubridate::my(042021))
+
+
+t6 = read_csv(here("data", "measurements_april2022.csv"))
+
+seedling_pot = read_csv(here("data", "seedling_pots.csv"))
+```
+
+```{r}
+
+missing1 = t4[! t4$seedling_id %in% t6$seedling_id,]%>% 
+  left_join(seedlings %>% 
+              filter(timepoint == 1) %>% 
+              select(seedling_id, seedling_sp, soil_type)) %>% 
+  left_join(seedling_pot) %>% 
+  select(seedling_id, seedling_sp, soil_type, pot ) %>% 
+  group_by(pot) %>% 
+  arrange(pot) 
+
+doubles = t6[duplicated(t6$seedling_id),]
+
+write_csv(missing1, here("data/missing_april2022.csv"))
+
+
+
+
+```
+
+

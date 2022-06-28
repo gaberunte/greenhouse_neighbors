@@ -1,0 +1,176 @@
+---
+title: "Drought design"
+author: "Gabe Runte"
+date: "3/8/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(MASS)
+library(tidyverse)
+library(here)
+library(janitor)
+library(lubridate)
+library(RColorBrewer)
+
+```
+
+
+```{r}
+#just before repotting
+seedling_size = read_csv(here("data", "ghecto_repotting_seedling_data.csv")) %>% 
+  mutate(timepoint = "3")
+t3 = read_csv(here("data", "ghecto_repotting_seedling_data.csv")) %>% 
+  mutate(timepoint = "3")%>% 
+  mutate(month = lubridate::my(032021))
+
+#from the grow up in year 1 before repotting
+seedlings = read_csv(here("data", "seedling_measurements.csv")) %>%
+  clean_names()
+
+seedlings = seedlings[(match(unique(seedlings$seedling_id), seedlings$seedling_id)),]%>% 
+  dplyr::select(seedling_id, seedling_sp, soil_type)
+
+#first measurements after repotting
+post_repotting = read_csv(here("data", "post_repotting_measurements.csv")) %>%
+  clean_names() %>% 
+  mutate(timepoint = "4")
+
+t4 = post_repotting %>% 
+  mutate(month = lubridate::my(042021))
+
+t5 = read_csv(here("data", "seedling_data_timepoint5.csv")) %>%
+  clean_names() %>% 
+  mutate(timepoint = "5")%>% 
+  mutate(month = lubridate::my(122021))
+
+t6 = read_csv(here("data", "seedling_measurements_winter22.csv")) %>%
+  clean_names() %>% 
+  mutate(timepoint = "6")%>% 
+  mutate(month = lubridate::my(022022))
+
+#which seedling was paired with which other seedling? they share a pot number 
+potting = read_csv(here("data", "ghecto_neighbor_pairs.csv")) %>% 
+  clean_names()
+
+seedling_sizes = t3 %>% 
+  bind_rows(t4, t5, t6) 
+
+
+seedling_size = seedling_sizes %>% 
+  left_join(seedlings) 
+
+master_full = seedling_size %>% 
+  left_join(potting, by= c("seedling_id" = "seedling_1" )) %>% 
+  left_join(potting, by= c("seedling_id" = "seedling_2" )) %>% 
+  mutate(pot = case_when(
+    !is.na(pot.x) ~ pot.x, 
+    !is.na(pot.y) ~ pot.y, 
+  )) %>% 
+  mutate(neighbor = case_when(
+    !is.na(seedling_1) ~ seedling_1, 
+    !is.na(seedling_2) ~ seedling_2, 
+  )) %>% 
+  dplyr::select(!c("pot.x", "pot.y", "seedling_1", "seedling_2")) %>% 
+  filter(timepoint>3) 
+
+all3 = master_full %>% 
+  group_by(seedling_id) %>% 
+  summarize(n = n()) #%>% 
+ # filter(n ==3)
+
+master = master_full %>% 
+  filter(seedling_id %in% all3$seedling_id)  %>% 
+  mutate(total_length = height_cm + additional_height)
+
+neighbor.facts = master %>% 
+  filter(timepoint == 4)   %>% 
+  dplyr::select("seedling_id", "height_cm", "diameter_mm", "seedling_sp", "soil_type") %>% 
+  rename(neighbor = seedling_id, 
+         neighb.height = height_cm, 
+         neighb.diameter = diameter_mm, 
+         neighb.spp = seedling_sp, 
+         neighb.soil = soil_type)
+
+```
+
+```{r}
+drought = t4 %>% 
+  select(seedling_id) %>% 
+  left_join(t6 %>% 
+              select(seedling_id, notes), by = "seedling_id") %>% 
+  left_join(master_full %>% 
+              filter(timepoint==4) %>% 
+              select(seedling_id, neighbor, pot, seedling_sp, soil_type)) %>% 
+  left_join(neighbor.facts %>% 
+              select(neighbor, neighb.spp, neighb.soil))
+
+#all pairs
+num = drought %>% 
+  group_by(pot) %>% 
+  summarize(n = n())
+
+
+drought.alive = drought %>% 
+  mutate(dead = notes == "dead")%>% 
+  replace_na(list(dead= "FALSE")) %>% 
+  filter(dead == FALSE) %>% 
+  select(!c(notes, dead))
+
+
+pots.alive = potting %>% 
+  filter(pot %in% master$pot) %>% 
+  filter(seedling_1 %in% drought.alive$seedling_id,seedling_2 %in% drought.alive$seedling_id) %>% 
+  left_join(seedlings %>% 
+              rename(seedling_1 = seedling_id)) %>% 
+  rename(s1_sp = seedling_sp, s1_soil = soil_type) %>% 
+  left_join(seedlings %>% 
+              rename(seedling_2 = seedling_id)) %>% 
+  rename(s2_sp = seedling_sp, s2_soil = soil_type)  %>% 
+  mutate(s1 = paste(s1_sp, s1_soil, sep = ""))%>% 
+  mutate(s2 = paste(s2_sp, s2_soil, sep = "")) %>% 
+  mutate(pair = paste(s1, s2, sep = "")) %>% 
+  mutate(pair = case_when(
+    pair == "PPPC" ~"PCPP",
+    
+    pair == "PQPC" ~"PCPQ",
+    pair == "PQPP" ~"PPPQ",
+    
+    pair == "QCPC" ~"PCQC",
+    pair == "QCPP" ~"PPQC",
+    pair == "QCPQ" ~"PQQC",
+    
+    pair == "QPPC" ~"PCQP",
+    pair == "QPPP" ~"PPQP",
+    pair == "QPPQ" ~"PQQP",
+    pair == "QPQC" ~"QCQP",
+    
+    pair == "QQPC" ~"PCQQ",
+    pair == "QQPP" ~"PPQQ",
+    pair == "QQPQ" ~"PQQQ",
+    pair == "QQQC" ~"QCQQ",
+    pair == "QQQP" ~"QPQQ",
+    TRUE ~ pair
+  ))
+
+
+summary = pots.alive %>% 
+  group_by(pair) %>% 
+  summarize(n = n())
+
+
+drought_assign = pots.alive %>% 
+  arrange(pair) %>% 
+  mutate(drought = rep(c("Yes", "No"), length(pots.alive$seedling_1)/2)) %>% 
+  arrange(pot) %>% 
+  select(pot, pair, drought)
+
+double_check = drought_assign %>% 
+  group_by(pair, drought) %>% 
+  summarize(n = n())
+
+
+#write_csv(drought_assign, here("data", "drought_assignments_bypot.csv"))
+```
+
