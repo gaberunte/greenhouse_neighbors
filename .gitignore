@@ -17,6 +17,7 @@ photos*
 *desttips_scf*
 *desttips_ab1*
 *sheet_photos*
+*unite_db*
 # Project files, i.e. `.project`, `.actionScriptProperties` and `.flexProperties`
 # should NOT be excluded as they contain compiler settings and other important
 # information for Eclipse / Flash Builder.
