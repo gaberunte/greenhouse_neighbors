@@ -7,20 +7,7 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-```
 
-```{r}
-#library(metagenomeSeq)
-#library(lubridate)
-#library(calecopal)
-#library(ape)
-#library(bioseq)
-#library(dada2)
-#library(matrixStats)
-```
-
-
-```{r setup}
 library(here)
 library(janitor)
 library(vegan)
@@ -29,8 +16,8 @@ library(bioseq)
 library(phyloseq)
 library(kmer)
 library(dada2)
-
 ```
+
 
 ```{r, message= FALSE}
 #size = read_csv(here("data", "ghecto_pilot_sizemetrics.csv"))%>% 

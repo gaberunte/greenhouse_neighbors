@@ -1,0 +1,182 @@
+---
+title: "Untitled"
+author: "Gabe Runte"
+date: "5/26/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(phyloseq)
+library(vegan)
+library(here)
+library(janitor)
+library(gridExtra)
+library(dada2)
+```
+
+
+```{r}
+consensus = read_csv(here("data", "full_0622_consensus.csv")) %>% 
+  clean_names() %>% 
+  dplyr::select(name, sequence) %>% 
+  rename(sequence_list_name = name)
+
+
+dest_tips_messy = read_csv(here("data", "full_0622_contigs.csv")) %>% 
+  clean_names() %>% 
+  filter(!is.na(percent_gc)) 
+
+plateset = dest_tips_messy %>% 
+  filter(substr(name, 1, 5) == "Plate") %>% 
+  separate(name, c("rmv", "plate", "column", "primer", "loc")) %>% 
+  select(!c(rmv, primer, loc)) %>% 
+  mutate(row = gsub("[[:digit:]]","",column)) %>% 
+  mutate(row = tolower(row)) %>% 
+  mutate(column = as.numeric(substring(column,1, nchar(column)-1))) %>% 
+  rename(newplate = plate, newcolumn = column, newrow = row)
+
+rev_set = read_csv(here("data", "tipstosequence_may2022.csv")) %>% 
+  select(!c(1,2,3,7)) %>% 
+  mutate(plate = substr(plate, 5,6))%>% 
+  mutate(newplate = substr(newplate, 5,6))
+
+plateset_clean = plateset %>% 
+  left_join(rev_set) %>% 
+  select(!c(newplate, newcolumn, newrow)) %>% 
+  mutate(platecolrow = paste(plate, column, row))
+
+
+its_1fset = dest_tips_messy %>% 
+  filter(substr(name, 1, 1) == "p") %>% 
+  filter(substr(name, nchar(name)-10, nchar(name)-10) == "-") %>% 
+  mutate(plate = substr(name, 2, 3))%>% 
+  mutate(column = as.numeric(substr(name, 5, nchar(name)-16)))%>% 
+  mutate(row = substr(name, nchar(name)-15, nchar(name)-15)) %>% 
+  select(!name)
+
+its1fset = dest_tips_messy %>% 
+  filter(substr(name, 1, 1) == "p")%>% 
+  filter(substr(name, nchar(name)-10, nchar(name)-10) != "-") %>% 
+  mutate(plate = substr(name, 2, 3))%>% 
+  mutate(column = as.numeric(substr(name, 5, 6)))%>% 
+  mutate(row = substr(name, 7, 7)) %>% 
+  select(!name)
+
+briefset = its1fset %>% 
+  bind_rows(its_1fset) %>%  
+  mutate(row = tolower(row)) %>% 
+  mutate(platecolrow = paste(plate, column, row))  %>% 
+  filter(!platecolrow %in% plateset_clean$platecolrow)
+
+  
+   
+dest_tips_long = plateset_clean %>% 
+  bind_rows(briefset) %>% 
+  relocate(plate, column, row) %>% 
+  mutate(row = tolower(row)) %>% 
+  filter(percent_hq > 1)
+  
+dest_tips = dest_tips_long %>% 
+  select(1:3, sequence_list_name) %>% 
+  left_join(consensus) %>% 
+  filter(sequence_list_name != "full_0622 Contig 10") %>% 
+  mutate(plate = as.numeric(plate))
+```
+
+
+```{r}
+tip.wells = read_csv(here("data", "ghecto_repotting_root_pulling_data.csv"))
+
+tips.long = tip.wells %>% 
+  pivot_longer(A:H, names_to = "well", values_to = "morphotype" ) %>% 
+  mutate(plate = as.numeric(substr(plate, 5,6))) %>% 
+  mutate(well = tolower(well))
+
+seedlings = read_csv(here("data", "seedling_measurements.csv")) %>% 
+  clean_names()
+seedlings = seedlings[(match(unique(seedlings$seedling_id), seedlings$seedling_id)),] %>% 
+  select(seedling_id, seedling_sp, soil_type)
+
+
+
+community = read_csv(here("data", "seedling_measurements.csv")) %>% 
+  clean_names()
+
+pulled_tips = read_csv(here("data", "ghecto_repotting_root_pulling_data.csv")) %>% 
+  mutate(pct_colonization = colonization_numerator/ colonization_denominator)
+tips_longer = pulled_tips %>% 
+  pivot_longer(cols=6:13, names_to = "row", values_to = "morphotype") %>% 
+  mutate(m_2nd = substr(morphotype, 2,2)) %>% 
+  mutate(morphotype = substr(morphotype, 1,1)) %>%
+  mutate(questionable = case_when(
+    morphotype == "Q" ~ 1,
+    m_2nd == "Q" ~ 1)) %>% 
+  mutate(questionable = case_when(
+    questionable == 1 ~ 1,
+    is.na(questionable) ~ 0)) %>% 
+  select(-m_2nd) %>% 
+  mutate(plate = as.numeric(substr(plate, 5,6))) %>%
+  mutate(row = tolower(row))
+
+sanger_sheet = dest_tips %>% 
+  left_join(tips_longer)
+```
+
+
+```{r, eval = FALSE}
+unite.ref <- "/Users/Gabe/Desktop/phd/ghecto/unite_db/sh_general_release_s_10.05.2021/sh_general_release_dynamic_s_10.05.2021.fasta"
+
+
+
+tiptaxa = assignTaxonomy(sanger_sheet$sequence, unite.ref, multithread = TRUE, tryRC = TRUE)
+
+dest_tiptaxa = sanger_sheet %>% 
+  bind_cols(tibble(as.data.frame(tiptaxa)))
+
+write_csv(dest_tiptaxa, here("data", "desttips_taxa_all0622.csv"))
+```
+
+
+```{r}
+dest_tiptaxa = read_csv(here("data", "desttips_taxa_all0622.csv")) %>% 
+  left_join(seedlings) %>% 
+  clean_names() %>% 
+  mutate(gensp = paste(substr(genus, 4, nchar(genus)), substr(species, 4, nchar(species)))) %>% 
+  filter(!is.na(genus))
+
+dest_guilds = read_csv(here("data", "desttips_taxa_ff.guilds.csv")) %>% 
+  clean_names() %>% 
+  separate(pcr, c("plate", "column", "row")) %>% 
+  mutate(plate = as.numeric(plate))%>% 
+  mutate(column = as.numeric(column))
+
+dest_master = dest_tiptaxa %>% 
+  left_join(dest_guilds)
+
+dest_sym = dest_master %>% 
+filter(grepl('Symbiotroph', trophic_mode))
+
+dest_ect = dest_master %>% 
+filter(grepl('Ectomycorrhizal', guild))
+```
+
+
+```{r}
+
+ggplot(dest_tiptaxa, aes(fill=gensp,  x=as.factor(seedling_id))) + 
+    geom_bar(position="stack") +
+  facet_grid(rows =vars(seedling_sp), cols = vars(soil_type) )
+
+ggplot(dest_sym, aes(fill=gensp,  x=as.factor(seedling_id))) + 
+    geom_bar(position="stack") +
+  facet_grid(rows =vars(seedling_sp), cols = vars(soil_type) )
+
+ggplot(dest_ect, aes(fill=gensp,  x=as.factor(seedling_id))) + 
+    geom_bar(position="stack") +
+  facet_grid(rows =vars(seedling_sp), cols = vars(soil_type) )
+
+```
+
