@@ -56,12 +56,17 @@ t7 = read_csv(here("data", "measurements_april2022.csv")) %>%
   mutate(timepoint = "7")%>% 
   mutate(month = lubridate::my(042022))
 
+t8 = read_csv(here("data", "Neighbor seedlings measurements 7_26_22 - Sheet1.csv")) %>% 
+  clean_names() %>% 
+  mutate(timepoint = "8")%>% 
+  mutate(month = lubridate::my(082022))
+
 #which seedling was paired with which other seedling? they share a pot number 
 potting = read_csv(here("data", "ghecto_neighbor_pairs.csv")) %>% 
   clean_names()
 
 seedling_sizes = t3 %>% 
-  bind_rows(t4, t5, t6, t7) 
+  bind_rows(t4, t5, t6, t7, t8) 
 
 
 seedling_size = seedling_sizes %>% 
@@ -628,7 +633,8 @@ TukeyHSD(aov(lm(change.length~seedling_sp*soil_type*neighb.spp*neighb.soil, data
 master7 = master7 %>% 
   mutate(seedling_sp = recode(seedling_sp, "P" = "Bigcone", "Q" = "Canyon Oak"))%>% 
   mutate(neighb.soil = recode(neighb.soil, "P" = "Bigcone", "Q" = "Canyon Oak", "C" = "Control")) %>% 
-  mutate(soil_type = recode(soil_type, "P" = "Bigcone", "Q" = "Canyon Oak", "C" = "Control"))
+  mutate(soil_type = recode(soil_type, "P" = "Bigcone", "Q" = "Canyon Oak", "C" = "Control")) %>% 
+  filter(!pot %in% c(211211, 211298))
 
 
 
@@ -637,7 +643,7 @@ ggplot(master7) +
     facet_wrap(~seedling_sp)+
   scale_fill_manual(
     values = c("darkseagreen4", "darkgoldenrod2"), name = "Neighbor species",
-    breaks = c("Bigcone", "Canyon Oak"), labels = c("Bigcone", "Canyon Oak"))+
+    breaks = c("P", "Q"), labels = c("Bigcone", "Canyon Oak"))+
   theme_minimal()+
      theme(axis.title.x = element_blank(), axis.text.x=element_blank(),axis.ticks.x=element_blank())+
   labs(x = "Neighbor Species",
@@ -651,7 +657,7 @@ ggplot(master7) +
     facet_wrap(~seedling_sp)+
   scale_fill_manual(
     values = c("darkseagreen4", "darkgoldenrod2"), name = "Neighbor species",
-    breaks = c("Bigcone", "Canyon Oak"), labels = c("Bigcone", "Canyon Oak"))+
+    breaks = c("P", "Q"), labels = c("Bigcone", "Canyon Oak"))+
   theme_minimal()+
      theme(axis.ticks.x=element_blank())+
   labs(x = "Soil Type",
@@ -696,6 +702,20 @@ ggplot(oaks1) +
 ggsave(here("figures", "growth_oaks_crossed.pdf"), height = 7, width = 7)
 
 #########
+
+ggplot(master7 %>% 
+         filter(soil_type == "Control")) +
+    geom_boxplot(aes(x = neighb.soil, y = change.length
+, fill = neighb.spp)) +
+    facet_wrap(~seedling_sp)+
+  scale_fill_manual(
+    values = c("darkseagreen4", "darkgoldenrod2"), name = "Neighbor species",
+    breaks = c("P", "Q"), labels = c("Bigcone", "Canyon Oak"))+
+  theme_minimal()+
+     theme(axis.ticks.x=element_blank())+
+  labs(x = "Soil Type",
+       y= "Growth since repotting")
+
 ```
 
 

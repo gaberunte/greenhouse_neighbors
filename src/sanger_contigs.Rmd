@@ -32,20 +32,20 @@ dest_tips_messy = read_csv(here("data", "full_0622_contigs.csv")) %>%
 plateset = dest_tips_messy %>% 
   filter(substr(name, 1, 5) == "Plate") %>% 
   separate(name, c("rmv", "plate", "column", "primer", "loc")) %>% 
-  select(!c(rmv, primer, loc)) %>% 
+  dplyr::select(!c(rmv, primer, loc)) %>% 
   mutate(row = gsub("[[:digit:]]","",column)) %>% 
   mutate(row = tolower(row)) %>% 
   mutate(column = as.numeric(substring(column,1, nchar(column)-1))) %>% 
   rename(newplate = plate, newcolumn = column, newrow = row)
 
 rev_set = read_csv(here("data", "tipstosequence_may2022.csv")) %>% 
-  select(!c(1,2,3,7)) %>% 
+ dplyr:: select(!c(1,2,3,7)) %>% 
   mutate(plate = substr(plate, 5,6))%>% 
   mutate(newplate = substr(newplate, 5,6))
 
 plateset_clean = plateset %>% 
   left_join(rev_set) %>% 
-  select(!c(newplate, newcolumn, newrow)) %>% 
+  dplyr::select(!c(newplate, newcolumn, newrow)) %>% 
   mutate(platecolrow = paste(plate, column, row))
 
 
@@ -55,7 +55,7 @@ its_1fset = dest_tips_messy %>%
   mutate(plate = substr(name, 2, 3))%>% 
   mutate(column = as.numeric(substr(name, 5, nchar(name)-16)))%>% 
   mutate(row = substr(name, nchar(name)-15, nchar(name)-15)) %>% 
-  select(!name)
+  dplyr::select(!name)
 
 its1fset = dest_tips_messy %>% 
   filter(substr(name, 1, 1) == "p")%>% 
@@ -63,7 +63,7 @@ its1fset = dest_tips_messy %>%
   mutate(plate = substr(name, 2, 3))%>% 
   mutate(column = as.numeric(substr(name, 5, 6)))%>% 
   mutate(row = substr(name, 7, 7)) %>% 
-  select(!name)
+  dplyr::select(!name)
 
 briefset = its1fset %>% 
   bind_rows(its_1fset) %>%  
@@ -80,7 +80,7 @@ dest_tips_long = plateset_clean %>%
   filter(percent_hq > 1)
   
 dest_tips = dest_tips_long %>% 
-  select(1:3, sequence_list_name) %>% 
+  dplyr::select(1:3, sequence_list_name) %>% 
   left_join(consensus) %>% 
   filter(sequence_list_name != "full_0622 Contig 10") %>% 
   mutate(plate = as.numeric(plate))
@@ -98,7 +98,7 @@ tips.long = tip.wells %>%
 seedlings = read_csv(here("data", "seedling_measurements.csv")) %>% 
   clean_names()
 seedlings = seedlings[(match(unique(seedlings$seedling_id), seedlings$seedling_id)),] %>% 
-  select(seedling_id, seedling_sp, soil_type)
+  dplyr::select(seedling_id, seedling_sp, soil_type)
 
 
 
@@ -117,7 +117,7 @@ tips_longer = pulled_tips %>%
   mutate(questionable = case_when(
     questionable == 1 ~ 1,
     is.na(questionable) ~ 0)) %>% 
-  select(-m_2nd) %>% 
+  dplyr::select(-m_2nd) %>% 
   mutate(plate = as.numeric(substr(plate, 5,6))) %>%
   mutate(row = tolower(row))
 
@@ -168,15 +168,15 @@ filter(grepl('Ectomycorrhizal', guild))
 
 ggplot(dest_tiptaxa, aes(fill=gensp,  x=as.factor(seedling_id))) + 
     geom_bar(position="stack") +
-  facet_grid(rows =vars(seedling_sp), cols = vars(soil_type) )
+  facet_grid(rows =vars(seedling_sp), cols = vars(soil_type) , scales = "free_x" )
 
 ggplot(dest_sym, aes(fill=gensp,  x=as.factor(seedling_id))) + 
     geom_bar(position="stack") +
-  facet_grid(rows =vars(seedling_sp), cols = vars(soil_type) )
+  facet_grid(rows =vars(seedling_sp), cols = vars(soil_type), scales = "free_x" )
 
 ggplot(dest_ect, aes(fill=gensp,  x=as.factor(seedling_id))) + 
     geom_bar(position="stack") +
-  facet_grid(rows =vars(seedling_sp), cols = vars(soil_type) )
+  facet_grid(rows =vars(seedling_sp), cols = vars(soil_type) , scales = "free_x" )
 
 ```
 

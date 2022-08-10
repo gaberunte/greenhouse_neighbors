@@ -1,0 +1,716 @@
+---
+title: "OTU goodness"
+author: "Gabe Runte"
+date: "10/5/2020"
+output: html_document
+---
+#Libraries
+```{r setup, include=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(phyloseq)
+library(metagenomeSeq)
+library(vegan)
+library(here)
+library(janitor)
+library(gridExtra)
+library(indicspecies)
+```
+
+#Datasets
+```{r datasets, message=FALSE, warning=FALSE}
+#reading in data
+taxon.path <- read_csv(here('data', 'otu_unite_repotting.csv'))%>%  # taxon path output from UNITE 
+  clean_names() %>% 
+  dplyr::rename(sequence = x1)
+
+funguilds <- read_csv(here('data','otu_unite_repotting_forfunguild.guilds.csv')) %>%  # guild data output from FUNGuild
+ clean_names() %>% 
+  dplyr::rename(sequence = x1) %>% 
+  select(!taxonomy) 
+
+guilds_taxonomy = funguilds %>% 
+  left_join(taxon.path, by = "sequence")
+
+otu_clusters = read_csv(here("data", "repotting_clusters.csv")) %>% 
+  rename(asv =...1, otu = cluster)
+
+funguilds_otu = funguilds %>%
+left_join(otu_clusters, by = "sequence")  %>% 
+  mutate(otu_full = paste("OTU", otu, sep = ""))
+
+funguild_filtered = funguilds_otu[match(unique(funguilds_otu$otu_full), funguilds_otu$otu_full),] 
+
+ 
+asv.tab <- read_csv(here('data','repotting_otu_table.csv')) # otu table output from DADA2 and DECIPHER
+asv.tab <- t(asv.tab)
+colnames(asv.tab) <- asv.tab[1,]
+asv.tab <- asv.tab[-1,]
+asv.tab <- asv.tab[1:106,] #remove control samples
+
+asv.tib = asv.tab %>%
+  t() %>% 
+  as_tibble()
+rownames(asv.tib) = colnames(asv.tab)
+asv.tib_wide = asv.tib %>% 
+  bind_cols(funguild_filtered %>% 
+              arrange(otu))
+
+```
+
+```{r metadata stuff}
+#just before repotting
+seedling_size = read_csv(here("data", "ghecto_repotting_seedling_data.csv")) %>% 
+  mutate(timepoint = "3")
+t3 = read_csv(here("data", "ghecto_repotting_seedling_data.csv")) %>% 
+  mutate(timepoint = "3")
+
+#from the grow up in year 1 before repotting
+seedlings = read_csv(here("data", "seedling_measurements.csv")) %>%
+  clean_names()
+
+seedlings = seedlings[(match(unique(seedlings$seedling_id), seedlings$seedling_id)),] %>% 
+  select(seedling_id, seedling_sp, soil_type)
+
+#first measurements after repotting
+post_repotting = read_csv(here("data", "post_repotting_measurements.csv")) %>%
+  clean_names() %>% 
+  mutate(timepoint = "4")
+
+#which seedling was paired with which other seedling? they share a pot number 
+potting = read_csv(here("data", "ghecto_neighbor_pairs.csv")) %>% 
+  clean_names()
+
+seedling_size = seedling_size %>% 
+  rbind(post_repotting)
+
+seedling_size = seedling_size %>% 
+  left_join(seedlings) 
+
+master = seedling_size %>% 
+  left_join(potting, by= c("seedling_id" = "seedling_1" )) %>% 
+  left_join(potting, by= c("seedling_id" = "seedling_2" )) %>% 
+  mutate(pot = case_when(
+    !is.na(pot.x) ~ pot.x, 
+    !is.na(pot.y) ~ pot.y, 
+  )) %>% 
+  mutate(neighbor = case_when(
+    !is.na(seedling_1) ~ seedling_1, 
+    !is.na(seedling_2) ~ seedling_2, 
+  )) %>% 
+  select(!c("pot.x", "pot.y", "seedling_1", "seedling_2"))
+
+
+#finished BM
+oaks = seedling_size %>% 
+  filter(seedling_sp == "Q")%>% 
+  mutate(zheight = (height_cm- mean(height_cm))/sd(height_cm))%>% 
+  mutate(zdiameter = (diameter_mm- mean(diameter_mm))/sd(diameter_mm))
+
+bigcone = seedling_size %>% 
+  filter(seedling_sp == "P")%>% 
+  mutate(zheight = (height_cm- mean(height_cm))/sd(height_cm))%>% 
+  mutate(zdiameter = (diameter_mm- mean(diameter_mm))/sd(diameter_mm))%>% 
+  filter(height_cm < 10)
+```
+
+
+```{r}
+samples.long = colnames(asv.tib)
+
+join_seedlings = seedling_size  %>% 
+  filter(timepoint == 3) %>% 
+              mutate(seedling_id = as.character(seedling_id))
+
+sam.tib = tibble(samples.long) %>% 
+  rename(sample = samples.long) %>% 
+  mutate(seedling_id = substr(sample, 1,4)) %>% 
+  mutate(rep = substr(sample, 9,9)) %>% 
+  mutate(type = substr(sample, 5,8)) %>% 
+  left_join(join_seedlings)
+```
+
+```{r prep final metadata file for phyloseq}
+metadata_long <- sam.tib
+
+metadata <- metadata_long %>% #dplyr::selecting only relevant columns for cleanliness
+  dplyr::select(!c(timepoint,notes))
+
+sample_table <-metadata
+rownames(sample_table)<- sample_table$sample
+```
+
+
+
+##Subsetting by FUNGuild confidence ranking. Taking only higher confidence assignments into asv.assigned
+```{r subsetting data, warning=FALSE, message=FALSE}
+#The below line of code filters out all unassigned taxa from all following analyses
+asv.tib_wide = asv.tib_wide %>% 
+  filter(taxon != "-")
+
+probable.guild <- asv.tib_wide %>% 
+  filter(confidence_ranking == "Probable") 
+highlyprobable.guild <- asv.tib_wide %>% 
+  filter(confidence_ranking == "Highly Probable")
+asv.conf <- bind_rows(probable.guild, highlyprobable.guild)
+
+asv.tab.conf <- asv.conf[,1:110] #subsetting to just columns containining numerical ASV values
+
+asv.conf.sym <- asv.conf %>% #filter by any trophic mode containing 'symbiotroph"
+  dplyr::filter(grepl("Symbiotroph",trophic_mode))
+asv.total.sym <- asv.tib_wide %>% #filter by any trophic mode containing 'symbiotroph"
+  dplyr::filter(grepl("Symbiotroph",trophic_mode))
+asv.conf.ect <- asv.conf %>% #filter by any guild assignment containing 'Ectomycorrhizal'
+  dplyr::filter(grepl("Ectomycorrhizal",guild))
+asv.total.ect <- asv.tib_wide %>% #filter by any guild assignment containing 'Ectomycorrhizal'
+  dplyr::filter(grepl("Ectomycorrhizal",guild))
+asv.conf.sap <- asv.conf %>% #filter by any guild assignment containing 'Ectomycorrhizal'
+  dplyr::filter(grepl("Saprotroph",guild))
+asv.total.sap <- asv.tib_wide %>% #filter by any guild assignment containing 'Ectomycorrhizal'
+  dplyr::filter(grepl("Saprotroph",guild))
+
+#subsetting to just rows containining numerical ASV values
+asv.tab.conf.sym <- asv.conf.sym[,1:110] %>% 
+  mutate_if(is.character, as.numeric)
+rownames(asv.tab.conf.sym) <- rownames(asv.conf.sym)
+
+asv.tab.total.sym <- asv.total.sym[,1:110] %>% 
+  mutate_if(is.character, as.numeric)
+rownames(asv.tab.total.sym) <- rownames(asv.total.sym)
+
+asv.tab.conf.ect <- asv.conf.ect[,1:110] %>% 
+  mutate_if(is.character, as.numeric)
+rownames(asv.tab.conf.ect) <- rownames(asv.conf.ect)
+
+asv.tab.total.ect <- asv.total.ect[,1:110]%>% 
+  mutate_if(is.character, as.numeric)
+rownames(asv.tab.total.ect) <- rownames(asv.total.ect)
+
+asv.tab.conf.sap <- asv.conf.sap[,1:110]%>% 
+  mutate_if(is.character, as.numeric)
+rownames(asv.tab.conf.sap) <- rownames(asv.conf.sap)
+
+asv.tab.total.sap <- asv.total.sap[,1:110]%>% 
+  mutate_if(is.character, as.numeric)
+rownames(asv.tab.total.sap) <- rownames(asv.total.sap)
+```
+
+
+##loading asv/otu table and changing sample name format 
+```{r prepare OTU tables}
+OTU_table_all <- data.matrix(asv.tib)
+OTU_table_sym <- data.matrix(asv.tab.total.sym)
+OTU_table_ect <- data.matrix(asv.tab.total.ect)
+OTU_table_sap <- data.matrix(asv.tab.total.sap)
+```
+
+
+```{r}
+#subset to samples with >500 reads 
+OTU_sums_all <- colSums(OTU_table_all)
+OTU_sums_sym <- colSums(OTU_table_sym)
+OTU_sums_ect <- colSums(OTU_table_ect)
+OTU_sums_sap <- colSums(OTU_table_sap)
+
+otu_500_all <- OTU_sums_all>1
+otu_500_sym <- OTU_sums_sym>1
+otu_500_ect <- OTU_sums_ect>1
+otu_500_sap <- OTU_sums_sap>1
+
+OTU_table_all <- OTU_table_all[,otu_500_all]
+OTU_table_sym <- OTU_table_sym[,otu_500_sym]
+OTU_table_ect <- OTU_table_ect[,otu_500_ect]
+OTU_table_sap <- OTU_table_sap[,otu_500_sap]
+
+OTU_table_all <- OTU_table_all[,which(colnames(OTU_table_all) %in% rownames(sample_table))]
+OTU_table_sym <- OTU_table_sym[,which(colnames(OTU_table_sym) %in% rownames(sample_table))]
+OTU_table_ect <- OTU_table_ect[,which(colnames(OTU_table_ect) %in% rownames(sample_table))]
+OTU_table_sap <- OTU_table_sap[,which(colnames(OTU_table_sap) %in% rownames(sample_table))]
+``` 
+
+
+
+
+```{r create all sample tables, warning = FALSE}
+sample_table_all <- sample_table[which(sample_table$sample %in% colnames(OTU_table_all)),]
+sample_table_sym <- sample_table[which(sample_table$sample %in% colnames(OTU_table_sym)),]
+sample_table_ect <- sample_table[which(sample_table$sample %in% colnames(OTU_table_ect)),]
+sample_table_sap <- sample_table[which(sample_table$sample %in% colnames(OTU_table_sap)),]
+
+physt_all = sample_data(sample_table_all);sample_names(physt_all) = sample_table_all$sample
+physt_sym = sample_data(sample_table_sym);sample_names(physt_sym) = sample_table_sym$sample
+physt_ect = sample_data(sample_table_ect);sample_names(physt_ect) = sample_table_ect$sample
+physt_sap = sample_data(sample_table_sap);sample_names(physt_sap) = sample_table_sap$sample
+
+```
+
+
+
+
+Phyloseq OTU tables for each subset and transect
+```{r transect-specific sets for phylo, warning=FALSE }
+otu.all <- OTU_table_all
+phyotu.all <- otu_table(otu.all, taxa_are_rows = TRUE)
+
+otu.sym <- OTU_table_sym
+phyotu.sym <- otu_table(otu.sym, taxa_are_rows = TRUE)
+
+otu.ect <- OTU_table_ect
+phyotu.ect <- otu_table(otu.ect, taxa_are_rows = TRUE)
+
+otu.sap <- OTU_table_sap
+phyotu.sap <- otu_table(otu.sap, taxa_are_rows = TRUE)
+```
+
+
+Phyloseq object for each subset and transect
+```{r create phyloseq objects}
+phy_all <- phyloseq(phyotu.all, physt_all)
+phy_sym <- phyloseq(phyotu.sym, physt_sym)
+phy_ect <- phyloseq(phyotu.ect, physt_ect)
+phy_sap <- phyloseq(phyotu.sap, physt_sap)
+```
+
+```{r switch otu to rra}
+phy_all = transform_sample_counts(phy_all, function(x) x/sum(x))
+phy_sym = transform_sample_counts(phy_sym, function(x) x/sum(x))
+phy_ect = transform_sample_counts(phy_ect, function(x) x/sum(x))
+phy_sap = transform_sample_counts(phy_sap, function(x) x/sum(x))
+
+
+```
+
+```{r load function metagenome}
+make_metagenomeSeq = function(physeq) {
+  require("metagenomeSeq")
+  require("phyloseq")
+  # Enforce orientation
+  if (!taxa_are_rows(physeq)) {
+    physeq <- t(physeq)}
+  OTU = as(otu_table(physeq), "matrix")
+  # Convert sample_data to AnnotatedDataFrame
+  ADF = AnnotatedDataFrame(data.frame(sample_data(physeq)))
+  # define dummy 'feature' data for OTUs, using their name Helps with
+  # extraction and relating to taxonomy later on.
+  TDF = AnnotatedDataFrame(data.frame(OTUname = taxa_names(physeq), row.names = taxa_names(physeq)))
+  # Create the metagenomeSeq object
+  MGS = newMRexperiment(counts = OTU, phenoData = ADF, featureData = TDF)
+  # Trigger metagenomeSeq to calculate its Cumulative Sum scaling factor.
+  MGS = cumNorm(MGS,p=cumNormStat(MGS))
+  return(MGS)
+}
+```
+
+```{r prepare and run MDS, message=FALSE, echo=false}
+meta.all<-make_metagenomeSeq(phy_all)
+meta.sym<-make_metagenomeSeq(phy_sym)
+meta.ect<-make_metagenomeSeq(phy_ect)
+meta.sap<-make_metagenomeSeq(phy_sap)
+
+css.all <-MRcounts(meta.all, norm= TRUE, log= TRUE)
+css.sym <-MRcounts(meta.sym, norm= TRUE, log= TRUE)
+css.ect <-MRcounts(meta.ect, norm= TRUE, log= TRUE)
+css.sap <-MRcounts(meta.sap, norm= TRUE, log= TRUE)
+
+csst.all <- t(css.all)
+csst.sym <- t(css.sym)
+csst.ect <- t(css.ect)
+csst.sap <- t(css.sap)
+
+dist.all <- vegdist(csst.all, method= "bray", binary=FALSE, diag=TRUE, upper=TRUE)
+dist.sym <- vegdist(csst.sym, method= "bray", binary=FALSE, diag=TRUE, upper=TRUE)
+dist.ect <- vegdist(csst.ect, method= "bray", binary=FALSE, diag=TRUE, upper=TRUE)
+dist.sap <- vegdist(csst.sap, method= "bray", binary=FALSE, diag=TRUE, upper=TRUE)
+
+set.seed(209)
+mds.all <- metaMDS(dist.all, distance = "bray", k=2, trymax = 1000)
+mds.sym <- metaMDS(dist.sym, distance = "bray", k=2, trymax = 1000)
+mds.ect <- metaMDS(dist.ect, distance = "bray", k=2, trymax = 1000)
+mds.sap <- metaMDS(dist.sap, distance = "bray", k=2, trymax = 1000)
+```
+
+
+
+
+
+```{r building data.scores, message=FALSE}
+data.scores.all <- as.data.frame(scores(mds.all))
+data.scores.sym <- as.data.frame(scores(mds.sym))
+data.scores.ect <- as.data.frame(scores(mds.ect))
+data.scores.sap <- as.data.frame(scores(mds.sap))
+
+data.scores.all$sample <- rownames(data.scores.all)
+data.scores.sym$sample <- rownames(data.scores.sym)
+data.scores.ect$sample <- rownames(data.scores.ect)
+data.scores.sap$sample <- rownames(data.scores.sap)
+
+
+
+nmds_all = metadata %>% 
+  left_join(data.scores.all) %>% 
+  filter(!is.na(soil_type))
+
+all_soil = nmds_all %>% 
+  filter(type == "soil")
+
+all_root = nmds_all %>% 
+  filter(type == "root")
+
+nmds_sym = metadata %>% 
+  left_join(data.scores.sym)%>% 
+  filter(!is.na(soil_type)) 
+
+sym_soil = nmds_sym %>% 
+  filter(type == "soil")
+
+sym_root = nmds_sym %>% 
+  filter(type == "root")
+
+nmds_ect = metadata %>% 
+  left_join(data.scores.ect)%>% 
+  filter(!is.na(soil_type))
+
+ect_soil = nmds_ect %>% 
+  filter(type == "soil")
+
+ect_root = nmds_ect %>% 
+  filter(type == "root")
+
+nmds_sap = metadata %>% 
+  left_join(data.scores.sap)%>% 
+  filter(!is.na(soil_type))
+
+sap_soil = nmds_sap %>% 
+  filter(type == "soil")
+
+sap_root = nmds_sap %>% 
+  filter(type == "root")
+
+```
+
+
+
+```{r}
+ggplot(nmds_all, aes(x= NMDS1, y= NMDS2)) + 
+  geom_point(aes(color = soil_type, shape = seedling_sp))
+
+ggplot(all_soil, aes(x= NMDS1, y= NMDS2)) + 
+  geom_point(aes(color = soil_type, shape = seedling_sp))
+
+ggplot(all_root, aes(x= NMDS1, y= NMDS2)) + 
+  geom_point(aes(color = soil_type, shape = seedling_sp))
+```
+
+```{r}
+ggplot(nmds_sym, aes(x= NMDS1, y= NMDS2)) + 
+  geom_point(aes(color = soil_type, shape = seedling_sp))
+
+ggplot(sym_soil, aes(x= NMDS1, y= NMDS2)) + 
+  geom_point(aes(color = soil_type, shape = seedling_sp))
+
+ggplot(sym_root, aes(x= NMDS1, y= NMDS2)) + 
+  geom_point(aes(color = soil_type, shape = seedling_sp))
+```
+
+
+```{r}
+ggplot(nmds_ect, aes(x= NMDS1, y= NMDS2)) + 
+  geom_point(aes(color = soil_type, shape = seedling_sp))
+
+ggplot(ect_soil, aes(x= NMDS1, y= NMDS2)) + 
+  geom_point(aes(color = soil_type, shape = seedling_sp))
+
+ggplot(ect_root, aes(x= NMDS1, y= NMDS2)) + 
+  geom_point(aes(color = soil_type, shape = seedling_sp))
+```
+
+
+```{r}
+ggplot(sym_root, aes(x= NMDS1, y= NMDS2,color = soil_type)) + 
+  geom_point(aes( shape = seedling_sp)) +
+  lims(x= c(-.3, .3))+
+  stat_ellipse() +
+  scale_color_manual(
+    values = c("darkseagreen4", "darkgoldenrod2", "cadetblue3" ), name = "Soil Type",
+    breaks = c("P", "Q", "C"), labels = c("Bigcone", "Canyon Oak", "Control")
+  ) +
+  scale_shape_manual(name = "Seedling Species", breaks= c("P", "Q"), labels = c("Bigcone", "Canyon Oak"), values = c(17,15))+
+  theme_minimal()
+
+ggplot(sym_soil, aes(x= NMDS1, y= NMDS2,color = soil_type)) + 
+  geom_point(aes( shape = seedling_sp)) +
+  lims(x= c(-.3, .3))+
+  stat_ellipse() +
+  scale_color_manual(
+    values = c("darkseagreen4", "darkgoldenrod2", "cadetblue3" ), name = "Soil Type",
+    breaks = c("P", "Q", "C"), labels = c("Bigcone", "Canyon Oak", "Control")
+  ) +
+  scale_shape_manual(name = "Seedling Species", breaks= c("P", "Q"), labels = c("Bigcone", "Canyon Oak"), values = c(17,15))+
+  theme_minimal()
+
+#ggsave(here("figures", "nmds_repotting_sym.pdf"))
+
+ggplot(nmds_sym, aes(x= NMDS1, y= NMDS2,color = seedling_sp)) + 
+  geom_point(aes( shape = soil_type)) +
+  lims(x= c(-.3, .3))+
+  scale_color_manual(name = "Seedling Species", breaks= c("P", "Q"), labels = c("Bigcone", "Canyon Oak"), values = c("darkseagreen4", "darkgoldenrod2")) +
+  stat_ellipse()+
+  scale_shape_manual(
+    values = c(15, 17, 19), name = "Soil Type",
+    breaks = c("P", "Q", "C"), labels = c("Bigcone", "Canyon Oak", "Control")) +
+    theme_minimal()
+#ggsave(here("figures", "nmds_repotting_sym_alternate.pdf"))
+
+ggplot(sym_soil, aes(x= NMDS1, y= NMDS2)) + 
+  geom_point(aes(color = soil_type, shape = seedling_sp))
+
+ggplot(sym_root, aes(x= NMDS1, y= NMDS2)) + 
+  geom_point(aes(color = soil_type, shape = seedling_sp))
+```
+
+```{r}
+ggplot(nmds_sym %>% 
+         filter(seedling_sp =="Q"), aes(x= NMDS1, y= NMDS2,color = soil_type)) + 
+  geom_point(aes()) +
+  lims(x= c(-.3, .3))+
+  stat_ellipse()+
+  scale_color_manual(
+    values = c("darkseagreen4", "darkgoldenrod2", "cadetblue3" ), name = "Soil Type",
+    breaks = c("P", "Q", "C"), labels = c("Bigcone", "Canyon Oak", "Control")
+  )+
+  theme_minimal()+
+  labs(title = "Canyon Oak Dissimilarity")
+#ggsave(here("figures", "nmds_repotting_sym_oaks.pdf"))
+ggplot(nmds_sym %>% 
+         filter(seedling_sp =="P"), aes(x= NMDS1, y= NMDS2,color = soil_type)) + 
+  geom_point(aes()) +
+  lims(x= c(-.3, .3))+
+  stat_ellipse()+
+  scale_color_manual(
+    values = c("darkseagreen4", "darkgoldenrod2", "cadetblue3" ), name = "Soil Type",
+    breaks = c("P", "Q", "C"), labels = c("Bigcone", "Canyon Oak", "Control")
+  )+
+  theme_minimal()+
+  labs(title = "Bigcone Dissimilarity")
+#ggsave(here("figures", "nmds_repotting_sym_bigcone.pdf"))
+```
+
+```{r}
+ggplot(nmds_sym %>% 
+         filter(soil_type =="Q"), aes(x= NMDS1, y= NMDS2,color = seedling_sp)) + 
+  geom_point(aes()) +
+  lims(x= c(-.3, .3))+
+  stat_ellipse()+
+  scale_color_manual(
+    values = c("darkseagreen4", "darkgoldenrod2"), name = "Seedling Species",
+    breaks = c("P", "Q"), labels = c("Bigcone", "Canyon Oak")
+  )+
+  theme_minimal()+
+  labs(title = "Oak Soil Dissimilarity")
+
+#ggsave(here("figures", "nmds_repotting_sym_oaksoil.pdf"))
+
+ggplot(nmds_sym %>% 
+         filter(soil_type =="P"), aes(x= NMDS1, y= NMDS2,color = seedling_sp)) + 
+  geom_point(aes()) +
+  lims(x= c(-.3, .3))+
+  stat_ellipse()+
+  scale_color_manual(
+    values = c("darkseagreen4", "darkgoldenrod2"), name = "Seedling Species",
+    breaks = c("P", "Q"), labels = c("Bigcone", "Canyon Oak")
+  )+
+  theme_minimal()+
+  labs(title = "Bigcone Soil Dissimilarity")
+#ggsave(here("figures", "nmds_repotting_sym_bigconesoil.pdf"))
+
+
+ggplot(nmds_sym %>% 
+         filter(soil_type =="C"), aes(x= NMDS1, y= NMDS2,color = seedling_sp)) + 
+  geom_point(aes()) +
+  lims(x= c(-.3, .3))+
+  stat_ellipse()+
+  scale_color_manual(
+    values = c("darkseagreen4", "darkgoldenrod2"), name = "Seedling Species",
+    breaks = c("P", "Q"), labels = c("Bigcone", "Canyon Oak")
+  )+
+  theme_minimal()+
+  labs(title = "Control Soil Dissimilarity")
+
+#ggsave(here("figures", "nmds_repotting_sym_controlsoil.pdf"))
+
+```
+
+
+```{r}
+asv.conf.sym.rs = asv.conf.sym[,1:106] %>% 
+  mutate_if(is.character,as.numeric)
+
+summat = as.matrix(asv.conf.sym.rs)/as.matrix(asv.conf.sym.rs) 
+summat[is.na(summat)] <- 0
+colSums(summat)
+
+nmds_sym  = nmds_sym%>%
+  mutate(richness = colSums(summat))
+
+ggplot(nmds_sym, aes(y=richness, x=seedling_sp,fill = soil_type ))+
+  geom_boxplot()
+
+
+asv.conf.ect.rs = asv.conf.ect[,1:106] %>% 
+  mutate_if(is.character,as.numeric)
+
+summat = as.matrix(asv.conf.ect.rs)/as.matrix(asv.conf.ect.rs) 
+summat[is.na(summat)] <- 0
+colSums(summat)
+
+nmds_ect  = nmds_ect%>%
+  mutate(richness = colSums(summat))
+
+ggplot(nmds_ect, aes(y=richness, x=seedling_sp,fill = soil_type ))+
+  geom_boxplot()
+
+```
+
+
+```{r}
+ggplot(nmds_ect, aes(x= NMDS1, y= NMDS2)) + 
+  geom_point(aes(color = soil_type, shape = seedling_sp))+
+  geom_jitter()
+
+ggplot(ect_soil, aes(x= NMDS1, y= NMDS2)) + 
+  geom_point(aes(color = soil_type, shape = seedling_sp))
+
+ggplot(ect_root, aes(x= NMDS1, y= NMDS2)) + 
+  geom_point(aes(color = soil_type, shape = seedling_sp))
+```
+
+
+```{r}
+ect.tib = asv.conf.ect %>% 
+  (t) %>% 
+  as.data.frame() %>% 
+  tibble() %>% 
+  mutate(seedling_id = colnames(asv.conf.ect)) %>% 
+  mutate(samtype = substr(seedling_id, 5,8))%>% 
+  mutate(rep = substr(seedling_id, 9,10))%>% 
+  mutate(seedling_id = substr(seedling_id, 1,4)) %>% 
+  relocate(seedling_id, samtype, rep)  %>% 
+  dplyr::filter(samtype == 'root')
+
+colnames(ect.tib)[4:19] <- asv.conf.ect$taxon
+
+ect.tib = ect.tib[1:106,]
+
+ect.tib[4:19] = lapply(ect.tib[4:19], FUN = function(y){as.numeric(y)})
+
+```
+
+
+```{r}
+ectr = ect.tib 
+
+class(ectr)
+df = ectr[,4:19]
+
+Merged_df<-as.data.frame(do.call(cbind,by(t(df),INDICES=names(df),FUN=colSums)))
+
+ecto.combined = bind_cols(ectr[,1:3], Merged_df)
+ect.long = ecto.combined%>% 
+  pivot_longer(cols = 4:12, names_to = "taxon", values_to = "reads") %>% 
+  group_by(seedling_id, rep) %>% 
+  slice(which.max(reads)) %>% 
+  filter(reads >0) %>% 
+  left_join(sample_table %>% 
+              filter(type == "root"))
+
+ggplot(ect.long, aes(x = seedling_id, fill = taxon)) +
+  geom_bar() +
+  facet_grid(rows = vars(seedling_sp), cols = vars(soil_type), scales = "free_x" )
+```
+
+
+```{r}
+ggplot(nmds_sap, aes(x= NMDS1, y= NMDS2)) + 
+  geom_point(aes(color = soil_type, shape = seedling_sp))
+
+ggplot(sap_soil, aes(x= NMDS1, y= NMDS2)) + 
+  geom_point(aes(color = soil_type, shape = seedling_sp))
+
+ggplot(sap_root, aes(x= NMDS1, y= NMDS2)) + 
+  geom_point(aes(color = soil_type, shape = seedling_sp))
+```
+
+```{r indicator spp, eval= FALSE}
+
+
+#otu.all.df = data.frame(otu.all)
+#colnames(otu.all.df) = substr(colnames(otu.all.df), 2, 10)
+
+nmds_all.indic = nmds_all %>% 
+  mutate(group = paste(seedling_sp, soil_type, sep = "_")) %>% 
+  filter(sample %in% colnames(otu.all))
+
+#otu.all.df.sub = otu.all.df[,which(colnames(otu.all.df) %in% nmds_all.indic$sample)]
+otu.all.df.sub = otu.all[,which(colnames(otu.all) %in% nmds_all.indic$sample)]
+
+indic.vector.all = as.factor(nmds_all.indic$group)
+class(indic.vector.all)
+vector1 = unclass(indic.vector.all)
+vector2 = as.numeric(vector1)
+length(vector1)
+dim(otu.all.df.sub)
+
+all.indic = multipatt(t(otu.all.df.sub), vector2, control = how(nperm=9999))
+all.indic.1 = multipatt(t(otu.all.df.sub), indic.vector.all, control = how(nperm=9999))
+
+
+
+
+otu.sym.indic = otu.sym[,which(colnames(otu.sym) %in% nmds_sym$sample)]
+nmds_sym.indic = nmds_sym %>% 
+  filter(sample %in% colnames(otu.sym.indic)) %>% 
+  mutate(group = paste(seedling_sp, soil_type, sep = "_"))
+dim(otu.sym.indic)
+dim(nmds_sym.indic)
+
+sym.indic = multipatt(t(otu.sym.indic), nmds_sym.indic$group, control = how(nperm=9999))
+
+summary(sym.indic)
+```
+
+```{r, eval = FALSE}
+
+
+all.indic$cluster
+all.indic.1$A
+
+
+summary(all.indic.1)
+```
+
+```{r}
+dist_matrix_all <- phyloseq::distance(phy_all, method = "bray")
+
+adonis(dist_matrix_all~nmds_all$soil_type+nmds_all$seedling_sp +nmds_all$height_cm+nmds_all$diameter_mm)
+```
+
+```{r}
+dist_matrix_sym <- phyloseq::distance(phy_sym, method = "bray")
+
+adonis(dist_matrix_sym~sample_data(phy_sym)$seedling_sp+sample_data(phy_sym)$soil_type+sample_data(phy_sym)$height_cm+sample_data(phy_sym)$diameter_mm)
+
+dist_matrix_ect <- phyloseq::distance(phy_ect, method = "bray")
+
+adonis(dist_matrix_ect~sample_data(phy_ect)$seedling_sp+sample_data(phy_ect)$soil_type+sample_data(phy_ect)$height_cm+sample_data(phy_ect)$diameter_mm)
+
+dist_matrix_sap <- phyloseq::distance(phy_sap, method = "bray")
+
+adonis(dist_matrix_sap~sample_data(phy_sap)$seedling_sp+sample_data(phy_sap)$soil_type+sample_data(phy_sap)$height_cm+sample_data(phy_sap)$diameter_mm)
+```
+
+
+
+```{r}
+#save.image(here("data", "miseqinfo_09122021.RData"))
+```
+

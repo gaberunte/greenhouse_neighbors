@@ -1,0 +1,191 @@
+---
+title: "ndvi vis"
+author: "Gabe Runte"
+date: "8/8/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(phyloseq)
+library(metagenomeSeq)
+library(vegan)
+library(here)
+library(janitor)
+library(gridExtra)
+library(indicspecies)
+```
+
+
+
+#Datasets
+
+```{r metadata stuff}
+#just before repotting
+seedling_size = read_csv(here("data", "ghecto_repotting_seedling_data.csv")) %>% 
+  mutate(timepoint = "3")
+t3 = read_csv(here("data", "ghecto_repotting_seedling_data.csv")) %>% 
+  mutate(timepoint = "3")%>% 
+  mutate(month = lubridate::my(032021))
+
+#from the grow up in year 1 before repotting
+seedlings = read_csv(here("data", "seedling_measurements.csv")) %>%
+  clean_names()
+
+seedlings = seedlings[(match(unique(seedlings$seedling_id), seedlings$seedling_id)),]%>% 
+  dplyr::select(seedling_id, seedling_sp, soil_type)
+
+#first measurements after repotting
+post_repotting = read_csv(here("data", "post_repotting_measurements.csv")) %>%
+  clean_names() %>% 
+  mutate(timepoint = "4")
+
+t4 = post_repotting %>% 
+  mutate(month = lubridate::my(042021))
+
+t5 = read_csv(here("data", "seedling_data_timepoint5.csv")) %>%
+  clean_names() %>% 
+  mutate(timepoint = "5")%>% 
+  mutate(month = lubridate::my(122021))
+
+t6 = read_csv(here("data", "seedling_measurements_winter22.csv")) %>%
+  clean_names() %>% 
+  mutate(timepoint = "6")%>% 
+  mutate(month = lubridate::my(022022))
+
+t7 = read_csv(here("data", "measurements_april2022.csv")) %>% 
+  clean_names() %>% 
+  rename(additional_height = add_height)%>% 
+  mutate(timepoint = "7")%>% 
+  mutate(month = lubridate::my(042022))
+
+#which seedling was paired with which other seedling? they share a pot number 
+potting = read_csv(here("data", "ghecto_neighbor_pairs.csv")) %>% 
+  clean_names()
+
+seedling_sizes = t3 %>% 
+  bind_rows(t4, t5, t6, t7) 
+
+
+seedling_size = seedling_sizes %>% 
+  left_join(seedlings) 
+
+master_full = seedling_size %>% 
+  left_join(potting, by= c("seedling_id" = "seedling_1" )) %>% 
+  left_join(potting, by= c("seedling_id" = "seedling_2" )) %>% 
+  mutate(pot = case_when(
+    !is.na(pot.x) ~ pot.x, 
+    !is.na(pot.y) ~ pot.y, 
+  )) %>% 
+  mutate(neighbor = case_when(
+    !is.na(seedling_1) ~ seedling_1, 
+    !is.na(seedling_2) ~ seedling_2, 
+  )) %>% 
+  dplyr::select(!c("pot.x", "pot.y", "seedling_1", "seedling_2")) %>% 
+  mutate(total_length = height_cm+ additional_height) 
+
+all3 = master_full %>% 
+  group_by(seedling_id) %>% 
+  summarize(n = n()) #%>% 
+ # filter(n ==3)
+
+master = master_full
+```
+
+```{r}
+master7 = master %>% 
+  filter(timepoint ==7)  %>% 
+  left_join(master %>% 
+            filter(timepoint==4) %>% 
+            dplyr::select("seedling_id", "height_cm", "diameter_mm", "chlorosis", "leaf_count")%>%
+            rename(initialheight = height_cm, 
+                   initialdiameter = diameter_mm, 
+                   initialchlorosis = chlorosis, 
+                   initialleaf = leaf_count)
+              )%>% 
+  mutate(change.ht = height_cm - initialheight, 
+         change.dia = diameter_mm - initialdiameter,
+         change.chl = chlorosis - initialchlorosis,
+         change.leaf = leaf_count - initialleaf,
+         change.length = total_length - initialheight
+         )  
+
+neighbor7 = master7   %>% 
+  dplyr::select(seedling_id, height_cm, diameter_mm, seedling_sp, soil_type, 
+                change.ht, change.dia, change.chl, change.leaf, change.length) %>% 
+  rename(neighbor = seedling_id, 
+         neighb.height = height_cm, 
+         neighb.diameter = diameter_mm, 
+         neighb.spp = seedling_sp, 
+         neighb.soil = soil_type, 
+         neighb.change.ht = change.ht,
+         neighb.change.dia = change.dia, 
+         neighb.change.chl = change.chl,
+         neighb.change.leaf = change.leaf, 
+         neighb.change.length = change.length)
+
+master7 = master7 %>% 
+  left_join(neighbor7) %>% 
+  mutate(is.ecto = soil_type %in% c("P", "Q")) %>% 
+  mutate(neighb.ecto = neighb.soil %in% c("P", "Q"))
+
+ndvi = read_csv(here("data", "NDVI_means_07.xlsx - Sheet 1.csv"))  %>% 
+  clean_names() %>% 
+  left_join(master7 ) %>% 
+  rename(ndvi = m) %>% 
+  filter(!is.na(height_cm)) %>% 
+  filter(!pot %in% c(211211, 211298))
+
+
+
+```
+
+```{r}
+ondvi = ndvi %>% 
+  filter(seedling_sp == "Q") %>% 
+  mutate(ndvi = ndvi - mean(ndvi))
+
+bndvi = ndvi %>% 
+  filter(seedling_sp == "P")%>% 
+  mutate(ndvi = ndvi - mean(ndvi))
+
+ggplot(ndvi, aes(x=seedling_sp, y= ndvi, fill = soil_type)) +
+  geom_boxplot()
+
+
+ggplot(ndvi %>% 
+         filter(seedling_sp == "P"), aes(x=seedling_sp, y= ndvi, fill = neighb.soil)) +
+  geom_boxplot()+
+  facet_grid(rows = vars(soil_type), cols = vars(neighb.spp))
+
+ggplot(ndvi %>% 
+         filter(seedling_sp == "Q"), aes(x=seedling_sp, y= ndvi, fill = neighb.soil)) +
+  geom_boxplot()+
+  facet_grid(rows = vars(soil_type), cols = vars(neighb.spp))
+
+
+ggplot(ondvi, aes(x=neighb.soil, y= ndvi, fill = neighb.spp)) +
+  geom_boxplot()+
+  facet_grid(rows = vars(soil_type))
+
+
+ggplot(bndvi, aes(x=neighb.soil, y= ndvi, fill = neighb.spp)) +
+  geom_boxplot()+
+  facet_grid(rows = vars(soil_type))
+
+ondvi %>% 
+filter(soil_type == "C") %>% 
+filter(neighb.spp == "P")
+```
+ 
+
+```{r}
+TukeyHSD(aov((lm(ndvi~seedling_sp*soil_type + neighb.spp*neighb.soil, data = ndvi))))
+
+TukeyHSD(aov((lm(ndvi~soil_type * neighb.spp*neighb.soil, data = ondvi))))
+
+TukeyHSD(aov((lm(ndvi~soil_type *neighb.spp*neighb.soil, data = bndvi))))
+
+```
+
