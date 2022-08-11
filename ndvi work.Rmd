@@ -147,8 +147,12 @@ ondvi = ndvi %>%
   mutate(ndvi = ndvi - mean(ndvi))
 
 bndvi = ndvi %>% 
-  filter(seedling_sp == "P")%>% 
-  mutate(ndvi = ndvi - mean(ndvi))
+  filter(seedling_sp == "P") %>% 
+  mutate(nsoil = case_when(
+    neighb.soil == "P" ~ "Bigcone",
+    neighb.soil == "Q" ~ "Canyon Live Oak",
+    neighb.soil == "C" ~ "Control"
+  ))
 
 ggplot(ndvi, aes(x=seedling_sp, y= ndvi, fill = soil_type)) +
   geom_boxplot()
@@ -173,6 +177,18 @@ ggplot(ondvi, aes(x=neighb.soil, y= ndvi, fill = neighb.spp)) +
 ggplot(bndvi, aes(x=neighb.soil, y= ndvi, fill = neighb.spp)) +
   geom_boxplot()+
   facet_grid(rows = vars(soil_type))
+
+
+ggplot(bndvi %>% 
+         filter(soil_type == "C"), aes(x=nsoil, y= ndvi, fill = nsoil)) +
+  geom_boxplot()+
+  scale_fill_manual(
+    values = c("darkseagreen4", "darkgoldenrod2", "cadetblue3" ), name = "Neighbor Soil",
+    breaks = c("Bigcone", "Canyon Live Oak", "Control"), labels = c("Bigcone", "Canyon Oak", "Control"))+
+  theme_minimal()+
+     theme(axis.ticks.x=element_blank())+
+  labs(x = "Neighbor soil type",
+       y= "Average NDVI")
 
 ondvi %>% 
 filter(soil_type == "C") %>% 
