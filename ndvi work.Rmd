@@ -181,15 +181,19 @@ ggplot(bndvi, aes(x=neighb.soil, y= ndvi, fill = neighb.spp)) +
 
 ggplot(bndvi %>% 
          filter(soil_type == "C"), aes(x=nsoil, y= ndvi, fill = nsoil)) +
-  geom_boxplot()+
+  geom_boxplot(alpha = 0.75)+
   scale_fill_manual(
     values = c("darkseagreen4", "darkgoldenrod2", "cadetblue3" ), name = "Neighbor Soil",
     breaks = c("Bigcone", "Canyon Live Oak", "Control"), labels = c("Bigcone", "Canyon Oak", "Control"))+
   theme_minimal()+
      theme(axis.ticks.x=element_blank())+
   labs(x = "Neighbor soil type",
-       y= "Average NDVI")
-
+       y= "Average NDVI")+
+  geom_jitter(width = .3, alpha = 0.35, aes(color = nsoil))+
+  scale_color_manual(
+    values = c("darkseagreen4", "darkgoldenrod2", "cadetblue3" ), name = "Neighbor Soil",
+    breaks = c("Bigcone", "Canyon Live Oak", "Control"), labels = c("Bigcone", "Canyon Oak", "Control"))
+ggsave(here("figures", "bigcone_ndvicontrol.pdf"), height = 5, width = 5)
 ondvi %>% 
 filter(soil_type == "C") %>% 
 filter(neighb.spp == "P")
