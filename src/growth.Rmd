@@ -194,21 +194,32 @@ ggplot(photo_data, aes(x= soil_type,y= above_area_cm2+underground_area_cm2, fill
 ```
 
 ```{r}
+
+photo_data = photo_data %>% 
+  mutate(soil.long = case_when(
+             soil_type=="Q"~ "Canyon Oak",
+             soil_type=="P"~ "Bigcone",
+             soil_type=="C"~ "Control",
+           ))
 ggplot(photo_data %>% 
-         filter(seedling_sp == "P"), aes(x= soil_type,y= above_area_cm2, fill = soil_type )) + 
-  geom_boxplot()+
+         filter(seedling_sp == "P"), aes(x= soil.long,y= above_area_cm2, fill = soil.long )) + 
+  geom_boxplot(alpha = 0.8)+
   scale_fill_manual(
     values = c("darkseagreen4", "darkgoldenrod2", "cadetblue3" ), name = "Soil Type",
-    breaks = c("P", "Q", "C"), labels = c("Bigcone", "Canyon Oak", "Control"))+
+    breaks = c("Bigcone", "Canyon Oak", "Control"), labels = c("Bigcone", "Canyon Oak", "Control"))+
   theme_minimal()+
      theme(axis.title.x = element_blank(), axis.text.x=element_blank(),axis.ticks.x=element_blank())+
   labs(title = "Bigcone aboveground area",
-       y= "Aboveground area (cm2)")
+       y= "Aboveground area (cm2)") +
+  geom_jitter(width = .3, alpha = 0.35, aes(color = soil.long))+
+  scale_color_manual(
+    values = c("darkseagreen4", "darkgoldenrod2", "cadetblue3" ), name = "Soil Type",
+    breaks = c("Bigcone", "Canyon Oak", "Control"), labels = c("Bigcone", "Canyon Oak", "Control"))
 
-ggsave(here("figures", "t1_bigcone_size.pdf"))
+ggsave(here("figures", "t1_bigcone_size.pdf"), height = 5, width = 7)
 
 ggplot(photo_data %>% 
-         filter(seedling_sp == "Q"), aes(x= soil_type,y= above_area_cm2, fill = soil_type )) + 
+         filter(seedling_sp == "Q"), aes(x= soil_type,y= above_area_cm2, fill = soil.long )) + 
   geom_boxplot()+
   scale_fill_manual(
     values = c("darkseagreen4", "darkgoldenrod2", "cadetblue3" ), name = "Soil Type",
@@ -227,19 +238,22 @@ TukeyHSD(aov(lm(root_shoot~soil_type, data = photo_data %>%
          filter(seedling_sp == "Q"))))
 
 ggplot(photo_data %>% 
-         filter(seedling_sp == "P"), aes(x= soil_type,y= root_shoot, fill = soil_type )) + 
+         filter(seedling_sp == "P"), aes(x= soil_type,y= root_shoot, fill = soil.long )) + 
   geom_boxplot()+
   scale_fill_manual(
     values = c("darkseagreen4", "darkgoldenrod2", "cadetblue3" ), name = "Soil Type",
-    breaks = c("P", "Q", "C"), labels = c("Bigcone", "Canyon Oak", "Control"))+
+    breaks = c("Bigcone", "Canyon Oak", "Control"), labels = c("Bigcone", "Canyon Oak", "Control"))+
   theme_minimal()+
      theme(axis.title.x = element_blank(), axis.text.x=element_blank(),axis.ticks.x=element_blank())+
   labs(title = "Bigcone root:shoot ratio",
-       y= "Root:shoot ratio")
-ggsave(here("figures", "t1_bigcone_rootshoot.pdf"))
+       y= "Root:shoot ratio")+geom_jitter(width = .3, alpha = 0.35, aes(color = soil.long))+
+  scale_color_manual(
+    values = c("darkseagreen4", "darkgoldenrod2", "cadetblue3" ), name = "Soil Type",
+    breaks = c("Bigcone", "Canyon Oak", "Control"), labels = c("Bigcone", "Canyon Oak", "Control"))
+ggsave(here("figures", "t1_bigcone_rootshoot.pdf"), width = 7, height = 5)
 
 ggplot(photo_data %>% 
-         filter(seedling_sp == "Q"), aes(x= soil_type,y= root_shoot, fill = soil_type )) + 
+         filter(seedling_sp == "Q"), aes(x= soil_type,y= root_shoot, fill = soil.long )) + 
   geom_boxplot()+
   scale_fill_manual(
     values = c("darkseagreen4", "darkgoldenrod2", "cadetblue3" ), name = "Soil Type",
@@ -253,7 +267,7 @@ ggsave(here("figures", "t1_oak_rootshoot.pdf"))
 
 
 ggplot(photo_data %>% 
-         filter(seedling_sp == "P"), aes(x= pct_col,y= above_area_cm2, color = soil_type )) + 
+         filter(seedling_sp == "P"), aes(x= pct_col,y= above_area_cm2, color = soil.long )) + 
   geom_point()+
   scale_color_manual(
     values = c("darkseagreen4", "darkgoldenrod2", "cadetblue3" ), name = "Soil Type",
@@ -735,17 +749,23 @@ ggsave(here("figures", "growth_oaks_crossed.pdf"), height = 7, width = 7)
 #########
 
 ggplot(master7 %>% 
-         filter(soil_type == "Control")) +
-    geom_boxplot(aes(x = neighb.soil, y = change.length
-, fill = neighb.spp)) +
-    facet_wrap(~seedling_sp)+
+         filter(soil_type == "Control") %>% 
+         filter(seedling_sp == "Bigcone"), aes(x = neighb.soil, y = change.length
+, fill = neighb.soil)) +
+    geom_boxplot(alpha = 0.75) +
   scale_fill_manual(
-    values = c("darkseagreen4", "darkgoldenrod2"), name = "Neighbor species",
-    breaks = c("P", "Q"), labels = c("Bigcone", "Canyon Oak"))+
+    values = c("darkseagreen4", "darkgoldenrod2", "cadetblue3" ), name = "Neighbor Soil Type",
+    breaks = c("Bigcone", "Canyon Oak", "Control"), labels = c("Bigcone", "Canyon Oak", "Control"))+
   theme_minimal()+
      theme(axis.ticks.x=element_blank())+
   labs(x = "Soil Type",
-       y= "Growth since repotting")
+       y= "Growth since repotting")+
+  geom_jitter(width = .3, alpha = 0.35, aes(color = neighb.soil))+
+  scale_color_manual(
+    values = c("darkseagreen4", "darkgoldenrod2", "cadetblue3" ), name = "Neighbor Soil Type",
+    breaks = c("Bigcone", "Canyon Oak", "Control"), labels = c("Bigcone", "Canyon Oak", "Control"))
+
+ggsave(here("figures", "t1_bigcone_size.pdf"), height = 5, width = 5)
 
 ```
 
@@ -1075,18 +1095,22 @@ TukeyHSD(aov(lm(change.length~neighb.soil, data = master8 %>%
       ))
 
 ggplot(master8 %>% 
-         dplyr::filter(seedling_sp == "Bigcone")) +
-    geom_boxplot(aes(x = soil_type, y = pct_col
-, fill = soil_type)) +
+         dplyr::filter(seedling_sp == "Bigcone"), aes(x = soil_type, y = pct_col
+, fill = soil_type, color = soil_type)) +
+    geom_boxplot(alpha = 0.75) +
   scale_fill_manual(
+    values = c("darkseagreen4", "darkgoldenrod2", "cadetblue3" ), name = "Soil Type",
+    breaks = c("Bigcone", "Canyon Oak", "Control"), labels = c("Bigcone", "Canyon Oak", "Control"))+
+  scale_color_manual(
     values = c("darkseagreen4", "darkgoldenrod2", "cadetblue3" ), name = "Soil Type",
     breaks = c("Bigcone", "Canyon Oak", "Control"), labels = c("Bigcone", "Canyon Oak", "Control"))+
   theme_minimal()+
      theme(axis.ticks.x=element_blank())+
   labs(x = "Soil Type",
-       y= "Percent colonized root tips")
+       y= "Percent colonized root tips") +
+  geom_jitter(alpha = .35, width = .3)
 
-#ggsave(here("figures", "bigcone_colonization.pdf"), height = 7, width = 7)
+ggsave(here("figures", "bigcone_colonization.pdf"), height = 7, width = 7)
 
 
 
