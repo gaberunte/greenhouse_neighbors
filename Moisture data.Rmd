@@ -54,7 +54,15 @@ ggplot(soil.moisture, aes(x = date, y = moisture, fill = treatment, group = grou
     scale_fill_manual(values= c("cadetblue3", "goldenrod3"), name= "Treatment", labels= c("Control", "Droughted")) +
   facet_wrap(~treatment)
 
-
+ggplot(soil.moisture %>% 
+         filter(date > mdy(08222022)), aes(x = date, y = moisture, fill = treatment, group = group)) +
+  geom_boxplot() +
+    labs(
+    y= "Percent Moisture",
+    x="Date") +
+  theme_minimal()+
+    scale_fill_manual(values= c("cadetblue3", "goldenrod3"), name= "Treatment", labels= c("Control", "Droughted"))
+ggsave(here("figures", "drought_progress_1022.jpg"), width= 7, height = 5)
 
 ```
 
