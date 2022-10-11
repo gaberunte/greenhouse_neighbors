@@ -60,7 +60,7 @@ t7 = read_csv(here("data", "measurements_april2022.csv")) %>%
   mutate(timepoint = "7")%>% 
   mutate(month = lubridate::my(042022))
 
-t8 = read_csv(here("data", "Neighbor seedlings measurements 7_26_22 - Sheet1.csv")) %>% 
+t8 = read_csv(here("data", "Neighbor seedlings measurements july.csv")) %>% 
   clean_names() %>% 
   mutate(timepoint = "8")%>% 
   mutate(month = lubridate::my(082022))
@@ -101,6 +101,19 @@ master = master_full #%>%
   #mutate(total_length = height_cm + additional_height)
 
 ```
+
+```{r}
+fj = master_full %>% 
+  select(seedling_id, seedling_sp, soil_type) %>% 
+  rename(neighbor = seedling_id, n_sp = seedling_sp, n_soil = soil_type)
+m = master_full %>% 
+  filter(timepoint == 8) %>% 
+  left_join(fj) %>% 
+  group_by(seedling_sp, soil_type, n_sp, n_soil) %>% 
+  summarize(n= n())
+  
+```
+
 
 ```{r data issues, eval = FALSE}
 
@@ -216,7 +229,22 @@ ggplot(photo_data %>%
     values = c("darkseagreen4", "darkgoldenrod2", "cadetblue3" ), name = "Soil Type",
     breaks = c("Bigcone", "Canyon Oak", "Control"), labels = c("Bigcone", "Canyon Oak", "Control"))
 
-ggsave(here("figures", "t1_bigcone_size.pdf"), height = 5, width = 7)
+ggplot(photo_data %>% 
+         filter(seedling_sp == "Q"), aes(x= soil.long,y= above_area_cm2, fill = soil.long )) + 
+  geom_boxplot(alpha = 0.8)+
+  scale_fill_manual(
+    values = c("darkseagreen4", "darkgoldenrod2", "cadetblue3" ), name = "Soil Type",
+    breaks = c("Bigcone", "Canyon Oak", "Control"), labels = c("Bigcone", "Canyon Oak", "Control"))+
+  theme_minimal()+
+     theme(axis.title.x = element_blank(), axis.text.x=element_blank(),axis.ticks.x=element_blank())+
+  labs(title = "Bigcone aboveground area",
+       y= "Aboveground area (cm2)") +
+  geom_jitter(width = .3, alpha = 0.35, aes(color = soil.long))+
+  scale_color_manual(
+    values = c("darkseagreen4", "darkgoldenrod2", "cadetblue3" ), name = "Soil Type",
+    breaks = c("Bigcone", "Canyon Oak", "Control"), labels = c("Bigcone", "Canyon Oak", "Control"))
+
+#ggsave(here("figures", "t1_bigcone_size.pdf"), height = 5, width = 7)
 
 ggplot(photo_data %>% 
          filter(seedling_sp == "Q"), aes(x= soil_type,y= above_area_cm2, fill = soil.long )) + 
@@ -235,6 +263,18 @@ TukeyHSD(aov(lm(root_shoot~soil_type, data = photo_data %>%
          filter(seedling_sp == "P"))))
 
 TukeyHSD(aov(lm(root_shoot~soil_type, data = photo_data %>% 
+         filter(seedling_sp == "Q"))))
+
+#TukeyHSD(aov(lm(above_area_cm2~soil_type, data = photo_data %>% 
+       #  filter(seedling_sp == "P"))))
+
+TukeyHSD(aov(lm(above_area_cm2~soil_type, data = photo_data %>% 
+         filter(seedling_sp == "Q"))))
+
+#TukeyHSD(aov(lm((above_area_cm2+underground_area_cm2)~soil_type, data = photo_data %>% 
+       #  filter(seedling_sp == "P"))))
+
+TukeyHSD(aov(lm((above_area_cm2+underground_area_cm2)~soil_type, data = photo_data %>% 
          filter(seedling_sp == "Q"))))
 
 ggplot(photo_data %>% 
@@ -941,6 +981,10 @@ master8 = master8 %>%
   left_join(neighbor8) %>% 
   mutate(is.ecto = soil_type %in% c("P", "Q")) %>% 
   mutate(neighb.ecto = neighb.soil %in% c("P", "Q"))
+
+summarize(master8 %>% 
+            group_by(seedling_sp, soil_type, neighb.soil, neighb.spp),
+          n = n())
 ```
 
 
@@ -980,9 +1024,13 @@ m8 = master8 %>%
 oaks = m8 %>% 
   filter(seedling_sp== "Q")
 bigcone = m8 %>% 
-  filter(seedling_sp == "P")
+  filter(seedling_sp == "P") 
 
+bc_real = bigcone %>% 
+  filter(comp_growth < 86)
 
+oaks_real = oaks %>% 
+  filter(comp_growth < 86)
 
 
 growth.8 = m8 %>% 
@@ -998,10 +1046,50 @@ ggplot(growth.8, aes( soil_type, rel_change_dia, fill = neighb.spp)) +
   geom_boxplot() +
   facet_wrap(~seedling_sp)
 
+
+ggplot(oaks, aes(x = soil_type, y= change.length,fill = neighb.soil )) +
+  geom_boxplot()
+
+ggplot(oaks, aes(x = soil_type, y= comp_growth,fill = neighb.soil )) +
+  geom_boxplot()
+
+ggplot(bigcone, aes(x = soil_type, y= comp_growth,fill = neighb.soil )) +
+  geom_boxplot()
+
+TukeyHSD(aov(change.length~neighb.soil, data = oaks_real %>% 
+               filter(soil_type == "C")))
+
+TukeyHSD(aov(change.length~neighb.soil, data = bc_real %>% 
+               filter(soil_type == "C")))
+
+TukeyHSD(aov(change.length~neighb.soil, data = oaks_real %>% 
+               filter(soil_type == "Q")))
+
+TukeyHSD(aov(change.length~neighb.soil, data = bc_real %>% 
+               filter(soil_type == "Q")))
+
+TukeyHSD(aov(change.length~neighb.soil, data = oaks_real %>% 
+               filter(soil_type == "P")))
+
+TukeyHSD(aov(change.length~neighb.soil, data = bc_real %>% 
+               filter(soil_type == "P")))
+
+#########
+
+TukeyHSD(aov(change.length~neighb.spp*neighb.soil, data = oaks_real %>% 
+               filter(soil_type == "Q")))
+
+TukeyHSD(aov(change.length~neighb.spp*neighb.soil, data = bc_real %>% 
+               filter(soil_type == "Q")))
+
+TukeyHSD(aov(change.length~neighb.spp*neighb.soil, data = oaks_real %>% 
+               filter(soil_type == "P")))
+
+TukeyHSD(aov(change.length~neighb.spp*neighb.soil, data = bc_real %>% 
+               filter(soil_type == "P")))
 ```
 
 ```{r}
-
 master8 = master8 %>% 
   mutate(seedling_sp = recode(seedling_sp, "P" = "Bigcone", "Q" = "Canyon Oak"))%>% 
   mutate(neighb.soil = recode(neighb.soil, "P" = "Bigcone", "Q" = "Canyon Oak", "C" = "Control")) %>% 
@@ -1071,8 +1159,11 @@ ggplot(oaks1) +
   labs(title = "Canyon Oak Growth",
        x = "Neighbor Species",
        y= "Growth since repotting")
-#ggsave(here("figures", "growth_oaks_crossed.pdf"), height = 7, width = 7) 
+#ggsave(here("figures", "growth_oaks_crossed.pdf"), height = 7, width = 7)
+```
 
+
+```{r}
 #########
 
 ggplot(master8 %>% 
@@ -1094,6 +1185,13 @@ TukeyHSD(aov(lm(change.length~neighb.soil, data = master8 %>%
          filter(seedling_sp == "Bigcone"))
       ))
 
+TukeyHSD(aov(lm(change.length~neighb.soil, data = master8 %>% 
+         filter(soil_type == "Control")%>% 
+         filter(seedling_sp == "Canyon Oak"))
+      ))
+
+
+
 ggplot(master8 %>% 
          dplyr::filter(seedling_sp == "Bigcone"), aes(x = soil_type, y = pct_col
 , fill = soil_type, color = soil_type)) +
@@ -1114,6 +1212,11 @@ ggsave(here("figures", "bigcone_colonization.pdf"), height = 7, width = 7)
 
 
 
+
+summarize(master8 %>% 
+            group_by(seedling_sp, soil_type, neighb.spp, neighb.soil), 
+          n = n())
+  
 
 
 ```
