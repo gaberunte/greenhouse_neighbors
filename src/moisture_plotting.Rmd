@@ -1,0 +1,33 @@
+---
+title: "Untitled"
+author: "Gabe Runte"
+date: "10/14/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(googlesheets4)
+library(janitor)
+library(lubridate)
+```
+
+```{r}
+moisture = read_sheet(ss = "https://docs.google.com/spreadsheets/d/1010Hkv3ZUsJjCNG9WqsKpI0sMiHM5ywLgEc-MlNiv0w/edit?usp=sharing", sheet = "Total")
+```
+
+```{r}
+data = moisture %>% 
+  clean_names() %>% 
+  mutate(date = mdy(date)) %>% 
+  mutate(dm = paste(date, drought_or_control, sep =""))
+
+
+ggplot(data, aes(date, moisture, group = dm, fill = drought_or_control)) +
+  geom_boxplot()+
+  theme_bw()+
+  scale_fill_manual(values = c("cornflowerblue","darkgoldenrod2"), breaks = c( "C", "D"), name = "Drought", labels = c("No", "Yes"))
+```
+

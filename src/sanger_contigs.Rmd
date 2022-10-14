@@ -68,8 +68,9 @@ its1fset = dest_tips_messy %>%
 briefset = its1fset %>% 
   bind_rows(its_1fset) %>%  
   mutate(row = tolower(row)) %>% 
-  mutate(platecolrow = paste(plate, column, row))  %>% 
-  filter(!platecolrow %in% plateset_clean$platecolrow)
+  mutate(platecolrow = paste(plate, column, row)) %>% 
+  group_by(platecolrow) %>% 
+  top_n(1, percent_hq)
 
   
    
@@ -174,9 +175,41 @@ ggplot(dest_sym, aes(fill=gensp,  x=as.factor(seedling_id))) +
     geom_bar(position="stack") +
   facet_grid(rows =vars(seedling_sp), cols = vars(soil_type), scales = "free_x" )
 
+
+dest_ect = dest_ect %>% 
+  mutate(st.long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Control soil",
+  ))%>% 
+  mutate(sp.long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak "
+  ))
 ggplot(dest_ect, aes(fill=gensp,  x=as.factor(seedling_id))) + 
     geom_bar(position="stack") +
+  facet_grid(rows =vars(sp.long), cols = vars(st.long) , scales = "free_x" ) +
+  theme_bw()+ 
+  theme(
+  axis.text.x = element_blank(),
+  axis.text.y = element_blank(),
+  axis.ticks = element_blank()) +
+  labs(x = "Seedling", y= "Tip Count")
+
+#ggsave(here("figures", "tip_ids.jpg"), width = 7, height = 5)
+
+
+ggplot(dest_ect %>% 
+         filter(seedling_sp=="P"), aes(fill=gensp,  x=as.factor(seedling_id))) + 
+    geom_bar(position="stack") +
   facet_grid(rows =vars(seedling_sp), cols = vars(soil_type) , scales = "free_x" )
+
+ggplot(dest_ect %>% 
+         filter(seedling_sp=="Q"), aes(fill=gensp,  x=as.factor(seedling_id))) + 
+    geom_bar(position="stack") +
+  facet_grid(rows =vars(seedling_sp), cols = vars(soil_type) , scales = "free_x" )
+
+
 
 ```
 

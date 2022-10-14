@@ -1,0 +1,150 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(tidyverse)
+library(here)
+library(janitor)
+```
+```{r}
+ndvi1 = read_csv(here("data", "ndvi", "NDVI_means_07.csv")) %>% 
+  clean_names() %>% 
+  mutate(timepoint = 1) %>% 
+  select(seedling_id,m, timepoint)
+ndvi2 = read_csv(here("data", "ndvi", "NDVI_means_09.csv"))%>% 
+  clean_names() %>% 
+  mutate(timepoint = 2) %>% 
+  select(seedling_id,m, timepoint)
+
+ndvi = ndvi1 %>% 
+  bind_rows(ndvi2)
+```
+
+
+```{r}
+seedlings = read_csv(here("data", "seedling_measurements.csv")) %>%
+  clean_names() %>% 
+  filter(timepoint == 1) %>% 
+  select(seedling_id, seedling_sp, soil_type)
+
+potting = read_csv(here("data", "ghecto_neighbor_pairs.csv")) %>% 
+  clean_names() %>% 
+  pivot_longer(cols = 2:3, names_to = "gone", values_to = "seedling_id") %>% 
+  select(!gone)
+drought = read_csv(here("data", "drought_assignments_bypot.csv")) %>% 
+  select(!pair) %>% 
+  left_join(potting)
+neighbora = read_csv(here("data", "ghecto_neighbor_pairs.csv")) %>% 
+  clean_names()%>% 
+  rename(neighbor = seedling_2, seedling_id = seedling_1)
+neighborb = read_csv(here("data", "ghecto_neighbor_pairs.csv")) %>% 
+  clean_names()%>% 
+  rename(neighbor = seedling_1, seedling_id = seedling_2)
+neighbors = neighbora %>% 
+  bind_rows(neighborb) %>% 
+  left_join(seedlings, by = c("neighbor" = "seedling_id")) %>% 
+  rename(n.soil = soil_type, n.sp = seedling_sp)
+
+
+
+mt = ndvi %>% 
+  left_join(drought) %>% 
+  left_join(seedlings) %>% 
+  filter(!is.na(drought))%>% 
+  filter(!is.na(seedling_sp))
+```
+
+
+```{r}
+ggplot(mt, aes(as.factor(timepoint), m, fill = drought))+
+  geom_boxplot() + 
+  facet_grid(cols = vars(seedling_sp), rows = vars(soil_type))+
+  scale_fill_manual(values = c("darkgoldenrod2", "cornflowerblue"), breaks = c("Yes", "No"))
+
+ggplot(mt, aes(as.factor(timepoint), m, color = drought, group = seedling_id))+
+  geom_jitter(width= 0.15) +
+  geom_line(alpha = 0.15)+
+  scale_colour_manual(values = c("darkgoldenrod2", "cornflowerblue"), breaks = c("Yes", "No"))+
+  theme_bw() + 
+  facet_wrap(~seedling_sp)
+
+
+```
+
+
+```{r}
+
+
+ndvi.oaks = mt %>% 
+  filter(seedling_sp == "Q")
+
+ndvi.bc = mt %>% 
+  filter(seedling_sp == "P")
+
+t.test(m~drought, data = ndvi.bc %>% 
+         filter(timepoint == 2))
+
+t.test(m~drought, data = ndvi.bc %>% 
+         filter(timepoint == 1))
+
+t.test(m~drought, data = ndvi.oaks %>% 
+         filter(timepoint == 2))
+
+t.test(m~drought, data = ndvi.oaks %>% 
+         filter(timepoint == 1))
+
+#TukeyHSD(aov(m~drought*seedling_sp*soil_type, data = mt))
+```
+
+```{r}
+ndvi.x = ndvi1 %>% 
+  left_join(ndvi2, by = "seedling_id") %>% 
+  rename(ndvi1= m.x, ndvi2 = m.y) %>% 
+  select(seedling_id, ndvi1, ndvi2) %>% 
+  left_join(drought) %>% 
+  left_join(seedlings) %>% 
+  filter(!is.na(drought))%>% 
+  filter(!is.na(seedling_sp)) %>% 
+  mutate(dndvi = ndvi2-ndvi1) %>% 
+  mutate(is.ecto = case_when(
+    soil_type %in% c("P", "Q") ~ "Yes", 
+    TRUE ~ "No"
+  )) %>% 
+  left_join(neighbors) %>% 
+  mutate(ecto.neighb = case_when(
+    n.soil %in% c("P", "Q") ~ "Yes", 
+    TRUE ~ "No"))
+  
+
+
+ggplot(ndvi.x, aes(soil_type, dndvi, fill = drought)) +
+  geom_boxplot()+
+  facet_wrap(~seedling_sp)
+
+t.test(dndvi~drought, data = ndvi.x %>% 
+         filter(seedling_sp == "P"))
+t.test(dndvi~drought, data = ndvi.x %>% 
+         filter(seedling_sp == "Q"))
+
+t.test(dndvi~drought, data = ndvi.x)
+
+
+TukeyHSD(aov(dndvi~drought*is.ecto, data = ndvi.x%>% 
+         filter(seedling_sp == "Q")))
+
+TukeyHSD(aov(dndvi~drought*is.ecto, data = ndvi.x%>% 
+         filter(seedling_sp == "P")))
+
+TukeyHSD(aov(dndvi~drought*n.sp, data = ndvi.x%>% 
+         filter(soil_type == "C") %>% 
+           filter(seedling_sp== "Q")))
+
+TukeyHSD(aov(dndvi~drought*is.ecto, data = ndvi.x%>% 
+         filter(seedling_sp == "P") ))
+
+TukeyHSD(aov(dndvi~drought*n.sp, data = ndvi.x%>% 
+         filter(seedling_sp == "P") ))
+```
+
