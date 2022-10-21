@@ -162,6 +162,8 @@ filter(grepl('Symbiotroph', trophic_mode))
 
 dest_ect = dest_master %>% 
 filter(grepl('Ectomycorrhizal', guild))
+
+#write_csv(dest_ect, here("data", "ecto_desttips_10122022.csv"))
 ```
 
 
