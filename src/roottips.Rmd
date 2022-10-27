@@ -18,7 +18,7 @@ library(vegan)
 
 ```{r tip sheet cleanup, message=FALSE, warning=FALSE}
 tips = read_csv(here("data", "ghecto_repotting_root_pulling_data.csv")) %>% 
-  mutate(pct_colonization = colonization_numerator/ colonization_denominator)
+  mutate(pct_colonization = colonization_numerator/ colonization_denominator) 
 tips_longer = tips %>% 
   pivot_longer(cols=6:13, names_to = "row", values_to = "morphotype") %>% 
   mutate(m_2nd = substr(morphotype, 2,2)) %>% 

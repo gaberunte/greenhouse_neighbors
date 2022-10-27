@@ -24,8 +24,8 @@ library(dada2)
 #  clean_names()
 size= read_csv(here("data", "ghecto_repotting_seedling_data.csv")) %>% 
   clean_names()
-biomass = read_csv(here("data", "ghecto_pilot_biomass.csv"))%>% 
-  clean_names()
+biomass = read_csv(here("data", "ghecto_repotting_destruction.csv"))%>% 
+  clean_names() 
 community = read_csv(here("data", "seedling_measurements.csv")) %>% 
   clean_names()
 
@@ -278,7 +278,7 @@ sanger_sheet = master_contigs %>%
   mutate(newplate = substr(newplate, 5, 6)) %>%
   select(-pcr_plate, -pcr_column, -pcr_row, -x)
 ```
-```
+
 ```{r}
 unite.ref = (here("unite_db", "sh_general_release_dynamic_s_10.05.2021.fasta"))
 
@@ -310,4 +310,26 @@ morph = sanger_sheet %>%
 ```
 
 
+```{r}
+ecto.tips <- read_csv(here("data", "ecto_desttips_10122022.csv")) %>% 
+  clean_names()
+
+```
+```{r}
+
+##match "biomass" sheet w "tips" plate number sheet
+desttips.plate <- merge(biomass, tips, by='seedling_id', all=TRUE)%>%
+  filter(!is.na(wet_above_g)) %>%
+  mutate(plate=substr(plate,nchar(plate)-1,nchar(plate)))
+
+```
+
+```{r}
+desttips.ecto <- merge(desttips.plate, ecto.tips, by='seedling_id', all=TRUE)%>%
+  filter(is.na(sequence))%>%
+  subset(,c('seedling_id', 'plate.x', 'column.x'))
+desttips.remaining<- merge(community, desttips.ecto, by='seedling_id')%>%
+  subset(,c('seedling_id', 'plate.x', 'column.x', 'seedling_sp', 'soil_type'))%>%
+  filter(soil_type %in% c('Q', 'P'))
+```
 
