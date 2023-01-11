@@ -43,7 +43,8 @@ soil.moisture <- read_csv(here("data", "Neighbor seedling soil moisture total.cs
   clean_names() %>%
   rename("treatment" = "drought_or_control") %>% 
   mutate(date = lubridate::mdy(date)) %>%
-  mutate(group = paste(treatment,date,sep = ""))
+  mutate(group = paste(treatment,date,sep = ""))%>%
+  filter(moisture<90)
 
 ggplot(soil.moisture, aes(x = date, y = moisture, fill = treatment, group = group)) +
   geom_boxplot() +
@@ -61,6 +62,16 @@ ggplot(soil.moisture, aes(x = date, y = moisture, fill = treatment, group = grou
     x="Date") +
   theme_minimal()+
     scale_fill_manual(values= c("cadetblue3", "goldenrod3"), name= "Treatment", labels= c("Control", "Droughted")) 
+
+soil_avg = soil.moisture %>% 
+  group_by(treatment, date) %>% 
+  summarize(
+    moist= mean(moisture)
+  )
+
+ggplot(soil_avg, aes(x= date, y = moist, color = treatment))+
+  geom_line()+
+  geom_point()
 
 ```
 

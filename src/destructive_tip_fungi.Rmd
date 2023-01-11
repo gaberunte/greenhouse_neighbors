@@ -19,7 +19,7 @@ library(dada2)
 ```
 
 
-```{r, message= FALSE}
+```{r, message= FALSE, eval=FALSE}
 #size = read_csv(here("data", "ghecto_pilot_sizemetrics.csv"))%>% 
 #  clean_names()
 size= read_csv(here("data", "ghecto_repotting_seedling_data.csv")) %>% 
@@ -29,9 +29,9 @@ biomass = read_csv(here("data", "ghecto_repotting_destruction.csv"))%>%
 community = read_csv(here("data", "seedling_measurements.csv")) %>% 
   clean_names()
 
-destructive.fasta = here("data", "tip_seqs", "destructive", "scf_trimmed.fasta")
+#destructive.fasta = here("data", "tip_seqs", "destructive", "scf_trimmed.fasta")
 
-destructive.dnabin = ape::read.dna(destructive.fasta, format= "fasta")
+#destructive.dnabin = ape::read.dna(destructive.fasta, format= "fasta")
 
 destructive.otus = otu(destructive.dnabin)
 destructive.tibble = as_tibble.DNAbin(destructive.dnabin)
@@ -318,7 +318,7 @@ ecto.tips <- read_csv(here("data", "ecto_desttips_10122022.csv")) %>%
 ```{r}
 
 ##match "biomass" sheet w "tips" plate number sheet
-desttips.plate <- merge(biomass, tips, by='seedling_id', all=TRUE)%>%
+desttips.plate <- merge(biomass, tips_longer, by='seedling_id', all=TRUE)%>%
   filter(!is.na(wet_above_g)) %>%
   mutate(plate=substr(plate,nchar(plate)-1,nchar(plate)))
 
@@ -327,9 +327,9 @@ desttips.plate <- merge(biomass, tips, by='seedling_id', all=TRUE)%>%
 ```{r}
 desttips.ecto <- merge(desttips.plate, ecto.tips, by='seedling_id', all=TRUE)%>%
   filter(is.na(sequence))%>%
-  subset(,c('seedling_id', 'plate.x', 'column.x'))
+  subset(,c('seedling_id', 'plate.x', 'column.x', 'row.x'))
 desttips.remaining<- merge(community, desttips.ecto, by='seedling_id')%>%
-  subset(,c('seedling_id', 'plate.x', 'column.x', 'seedling_sp', 'soil_type'))%>%
-  filter(soil_type %in% c('Q', 'P'))
+  subset(,c('seedling_id', 'plate.x', 'column.x', 'row.x', 'seedling_sp', 'soil_type'))%>%
+  filter(soil_type %in% c('Q', 'P'))%>%
 ```
 
