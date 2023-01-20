@@ -5,29 +5,7 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-```
 
-## R Markdown
-
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
-```
-
-## Including Plots
-
-You can also embed plots, for example:
-
-```{r pressure, echo=FALSE}
-plot(pressure)
-```
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
 library(MASS)
 library(tidyverse)
 library(here)
@@ -39,7 +17,7 @@ library(dbplyr)
 ```
 
 ```{r}
-soil.moisture <- read_csv(here("data", "Neighbor seedling soil moisture total.csv")) %>% 
+soil.moisture <- read_csv(here("data", "Neighbor seedling soil moisture  - Total.csv")) %>% 
   clean_names() %>%
   rename("treatment" = "drought_or_control") %>% 
   mutate(date = lubridate::mdy(date)) %>%
@@ -74,4 +52,98 @@ ggplot(soil_avg, aes(x= date, y = moist, color = treatment))+
   geom_point()
 
 ```
+
+
+```{r}
+ggplot(soil.moisture %>% 
+         filter(date > '2022-09-01'), aes(x = date, y = moisture, fill = treatment, group = group)) +
+  geom_boxplot(aes(),col = "grey35", outlier.alpha = 0.5) +
+    labs(
+    y= "Percent Moisture",
+    x="Date") +
+  theme_minimal()+
+    scale_fill_manual(values= c("cadetblue3", "goldenrod3"), name= "Treatment", labels= c("Control", "Droughted")) 
+```
+```{r}
+clim = read_csv(here("data/watering_climate.csv")) %>% 
+  clean_names() %>% 
+  mutate(week = week(date)) %>% 
+  group_by(week) %>% 
+  summarize(date = mean(date, na.rm = T),
+            precip = sum(prcp, na.rm = T),
+            tmax = mean(tmax, na.rm = T))
+  
+
+moist.sep = soil.moisture %>% 
+         filter(date > '2022-09-01')
+
+
+ggplot(data= moist.sep, aes(x = date, y = moisture)) +
+  geom_bar(data= clim, aes(x= date, y= precip), fill = 'steelblue4',col = NA,stat="identity", alpha = 0.6,width = 4)+
+  geom_boxplot(data= moist.sep, aes(x = date, y = moisture, fill = treatment, group = group), col = "grey40", outlier.alpha = 0.5) +
+    labs(
+    y= "Percent soil moisture (%)",
+    x="Date") +
+  theme_minimal()+
+    scale_fill_manual(values= c("seagreen4", "khaki3"), name= "Treatment", labels= c("Watered", "Droughted")) +
+   scale_y_continuous(
+    
+    # Features of the first axis
+    name = "Soil moisture (%)",
+    
+    # Add a second axis and specify its features
+    sec.axis = sec_axis(~.*1.1, name="Weekly precipitation (mm)"))+
+  theme(axis.text.y.right = element_text(color = "steelblue4"),
+        axis.title.y.right = element_text(color = "steelblue4"),
+        axis.title.x = element_blank())
+#ggsave(here("figures", "soil_moisture_climate.png"), width = 7, height = 5)
+ggplot(data= moist.sep, aes(x = date, y = moisture)) +
+  geom_bar(data= clim, aes(x= date, y= precip), fill = 'steelblue4',col = NA,stat="identity", alpha = 0.75,width = 4)+
+  geom_boxplot(data= moist.sep, aes(x = date, y = moisture, fill = treatment, group = group, color = treatment), outlier.alpha = 0.5) +
+    labs(
+    y= "Percent soil moisture (%)",
+    x="Date") +
+  theme_minimal()+
+    scale_fill_manual(values= c("seagreen4", "khaki3"), name= "Treatment", labels= c("Control", "Droughted")) +
+    scale_color_manual(values= c("olivedrab4", "khaki4"), name= "Treatment", labels= c("Control", "Droughted"))+
+   scale_y_continuous(
+    
+    # Features of the first axis
+    name = "Soil moisture (%)",
+    
+    # Add a second axis and specify its features
+    sec.axis = sec_axis(~.*1.1, name="Weekly precipitation (mm)"))+
+  theme(axis.text.y.right = element_text(color = "steelblue4"),
+        axis.title.y.right = element_text(color = "steelblue4"),
+        axis.title.x = element_blank())
+
+ggplot(data= moist.sep, aes(x = date, y = moisture)) +
+  geom_bar(data= clim, aes(x= date, y= precip), fill = 'steelblue4',col = NA,stat="identity", alpha = 0.75,width = 4)+
+  geom_violin(data= moist.sep, aes(x = date, y = moisture, fill = treatment, group = group, color = treatment), alpha = 0.5, width = 15) +
+    labs(
+    y= "Percent soil moisture (%)",
+    x="Date") +
+  theme_minimal()+
+    scale_fill_manual(values= c("seagreen4", "khaki3"), name= "Treatment", labels= c("Control", "Droughted")) +
+    scale_color_manual(values= c("olivedrab4", "khaki4"), name= "Treatment", labels= c("Control", "Droughted"))+
+   scale_y_continuous(
+    
+    # Features of the first axis
+    name = "Soil moisture (%)",
+    
+    # Add a second axis and specify its features
+    sec.axis = sec_axis(~.*1.1, name="Weekly precipitation (mm)"))+
+  theme(axis.text.y.right = element_text(color = "steelblue4"),
+        axis.title.y.right = element_text(color = "steelblue4"),
+        axis.title.x = element_blank())
+
+
+
+  
+```
+
+
+
+
+
 
