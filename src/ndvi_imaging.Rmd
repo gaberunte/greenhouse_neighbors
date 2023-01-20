@@ -58,10 +58,32 @@ mt = ndvi %>%
 
 
 ```{r}
+
+seed.labs <- c("Bigcone Seedling", "Oak Seedling")
+names(seed.labs) <- c("P", "Q")
+
+soil.labs <- c("Sterile Soil", "Bigcone Soil", "Oak Soil")
+names(soil.labs) <- c("C", "P", "Q")
+
+
+ggplot(mt, aes(drought, m, fill = drought, color = as.factor(timepoint)))+
+  geom_boxplot(alpha = 0.85) +
+geom_point(position = position_jitterdodge(), alpha=0.1)+
+  labs(x = "Drought treatment",
+       y= "NDVI")+
+  facet_grid(cols = vars(seedling_sp), rows = vars(soil_type), 
+             labeller = labeller(seedling_sp = seed.labs,soil_type = soil.labs))+
+  scale_fill_manual(name = "Drought",values = c("darkgoldenrod2", "cornflowerblue"), breaks = c("Yes", "No"))+
+  scale_color_manual(name = "Time", values = c("burlywood3", "darkslategray"), breaks = c("1", "2"), labels = c("Pre-drought", "Mid-drought"))+
+  theme_bw()
+
+#ggsave(here("figures", "ndvi_middrought.jpg"), width = 5, height = 5)
+
 ggplot(mt, aes(as.factor(timepoint), m, fill = drought))+
   geom_boxplot() + 
   facet_grid(cols = vars(seedling_sp), rows = vars(soil_type))+
   scale_fill_manual(values = c("darkgoldenrod2", "cornflowerblue"), breaks = c("Yes", "No"))
+
 
 ggplot(mt, aes(as.factor(timepoint), m, color = drought, group = seedling_id))+
   geom_jitter(width= 0.15) +
