@@ -27,4 +27,4 @@ photos*
 *scan*
 *DS_Store*
 *.RData
-*.fasta
+*.fast*
