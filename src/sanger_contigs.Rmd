@@ -194,7 +194,6 @@ ggplot(dest_ect, aes(fill=gensp,  x=as.factor(seedling_id))) +
   theme_bw()+ 
   theme(
   axis.text.x = element_blank(),
-  axis.text.y = element_blank(),
   axis.ticks = element_blank()) +
   labs(x = "Seedling", y= "Tip Count")
 
@@ -214,4 +213,15 @@ ggplot(dest_ect %>%
 
 
 ```
+
+```{r}
+treat_sheet = tips_longer %>% 
+  left_join(seedlings)
+
+plate27 = treat_sheet %>% 
+  filter(plate == 27) %>% 
+  filter(seedling_sp=="P")%>% 
+  filter(soil_type=="Q")
+```
+
 

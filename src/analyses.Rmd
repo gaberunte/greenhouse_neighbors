@@ -1,0 +1,121 @@
+---
+title: "Untitled"
+author: "Gabe Runte"
+date: "2023-05-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(here)
+library(janitor)
+library(lubridate)
+library(tidyverse)
+```
+
+
+## Keeping track of project data
+```{r}
+drought = read_csv(here("data", "drought_treatments.csv")) %>% 
+  rename(drought_treat=treatment)
+
+ndvi = read_csv(here("data", "ndvi_data.csv")) %>% 
+  filter(!is.na(seedling_sp))%>% 
+  filter(!is.na(treatment))
+
+
+  
+
+size_master = read_csv(here("data", "seedling_measurements", "size_master.csv")) %>% 
+  mutate(length = case_when(
+    !is.na(branching) ~ branching + height_cm,
+    .default = height_cm
+  )) %>% 
+  left_join(drought)
+
+
+pressure = read_csv(here("data/harvest", "pressure_bomb - Sheet1.csv")) %>% 
+  clean_names() %>% 
+  select(1:4) %>% 
+  mutate(pressure_mpa = as.numeric(pressure_mpa)) %>% 
+  filter(!is.na(pressure_mpa))%>% 
+  mutate(time = str_sub(time, 1,1)) %>% 
+  mutate(time = tolower(time)) %>% 
+  pivot_wider(values_from = pressure_mpa, names_from = time) %>% 
+  mutate(diff_pressure = m-p) %>% 
+  left_join(size_master %>% 
+              filter(date == "2023-03-01") %>% 
+              select(seedling_id, soil_type, seedling_sp, drought_treat)) %>% 
+filter(!is.na(soil_type))
+```
+
+```{r}
+ggplot(size_master, aes(x = date, y = height_cm, color = soil_type, group = seedling_id))+
+  geom_point()+
+  geom_line(alpha = 0.15)+
+  facet_wrap(~seedling_sp)+
+  theme_minimal()+
+  scale_color_manual(breaks = c("C","P", "Q"), name = "Soil type", values = c("#9999ff", "#006600", "#cccc00"),
+                     labels = c("Control soil", "Bigcone soil", "Oak soil"))
+
+ggplot(size_master %>% 
+         filter(seedling_sp == "P") %>% 
+         filter(!is.na(drought_treat)), aes(x = date, y = chlorosis, color = soil_type, group = seedling_id))+
+  geom_point(position = position_jitter(), alpha = 0.25)+
+  geom_line(alpha = 0.15)+
+  theme_minimal()+
+  scale_color_manual(breaks = c("C","P", "Q"), name = "Soil type", values = c("#9999ff", "#006600", "#cccc00"),
+                     labels = c("Control soil", "Bigcone soil", "Oak soil"))+
+  facet_wrap(~drought_treat)
+```
+
+
+```{r}
+ggplot(ndvi, aes(x = sample, y = median_ndvi, color = soil_type, group = seedling_id))+
+  geom_point()+
+  geom_line(alpha = 0.15)+
+  facet_grid(rows = vars(seedling_sp), cols = vars(treatment))+
+  theme_minimal()+
+  scale_color_manual(breaks = c("C","P", "Q"), name = "Soil type", values = c("#9999ff", "#006600", "#cccc00"),
+                     labels = c("Control soil", "Bigcone soil", "Oak soil"))
+
+
+ggplot(ndvi %>% 
+         filter(sample == 4), aes(x = treatment, y = median_ndvi, fill = soil_type))+
+  geom_boxplot()+
+  facet_grid(row = vars(soil_type), cols = vars(seedling_sp))+
+  theme_minimal()+
+  scale_fill_manual(breaks = c("C","P", "Q"), name = "Soil type", values = c("#9999ff", "#006600", "#cccc00"),
+                     labels = c("Control soil", "Bigcone soil", "Oak soil"))
+
+
+ggplot(pressure, aes(x = drought_treat, y = diff_pressure, fill = soil_type))+
+  geom_boxplot()+
+  facet_grid(row = vars(soil_type), cols = vars(seedling_sp))+
+  theme_minimal()+
+  scale_fill_manual(breaks = c("C","P", "Q"), name = "Soil type", values = c("#9999ff", "#006600", "#cccc00"),
+                     labels = c("Control soil", "Bigcone soil", "Oak soil"))
+```
+
+
+## NDVI change over time
+```{r}
+ndvi_wide = ndvi %>% 
+  select(sample, median_ndvi, seedling_sp, soil_type, treatment, seedling_id) %>% 
+  mutate(sample = case_when(
+    sample == 1 ~ "first",
+    sample == 2 ~ "second",
+    sample == 3 ~ "third",
+    sample == 4 ~ "fourth"
+  )) %>% 
+  pivot_wider(names_from = sample, values_from = median_ndvi) %>% 
+  mutate(fourth = as.numeric(fourth), first = as.numeric(first))
+  mutate(ndvi_change = fourth - first)
+```
+
+
+
+
+
+

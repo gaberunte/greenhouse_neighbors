@@ -1,0 +1,277 @@
+---
+title: "Harvest planning"
+author: "Gabe Runte"
+date: "2023-03-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(here)
+library(janitor)
+library(lubridate)
+library(kableExtra)
+```
+
+```{r}
+                     
+                     
+trees = read_csv(here("data", "seedling_measurements", "size_master.csv")) %>% 
+  filter(date >my("feb2023")) %>% 
+  left_join(read_csv(here("data", "drought_treatments.csv"))) %>% 
+  mutate(dead = case_when(alive == 0~ 1, alive == 1~ 0))
+
+harvest = trees %>% 
+  group_by(seedling_sp, soil_type, neighb_sp, neighb_st, treatment) %>% 
+  summarise(alive = sum(alive), dead = sum(dead), total = sum(dead+alive)) %>% 
+  filter(total>1) %>% 
+  mutate(pct_alv = alive/total)
+
+kable(harvest)
+
+drought = read_csv(here("data", "drought_treatments.csv")) %>% 
+  filter(!pot %in% trees$pot)
+```
+
+```{r}
+harvest_schedule = trees %>% 
+  filter(date > my(022023)) %>% 
+  filter(alive == 1) %>% 
+  filter(neighb_alive == 1) %>% 
+  mutate(trt_str = paste(seedling_sp, soil_type, neighb_sp, neighb_st, treatment, sep = "")) %>% 
+  arrange(trt_str)%>% 
+  mutate(two_dir = case_when( # to filter for the trt_str that could be either seedling first 
+    trt_str %in% c("PCPPC", "PCPPD", "PCPQC", "PCPQD", "PPPPD", "PPPQC","PPPQD",
+                   "PPQCC", "PPQCD", "PPQPC", "PPQPD", "PPQQC", "PPQQD", 
+                   "PQPQC", "PQPQD", "PQQPC", "PQQPD", "PQQQC", "PQQQD", "QCQCC",
+                   "QCQCD", "QCQPC", "QCQPD", "QCQQC", "QCQQD", "QPQPC", "QPQPD",
+                   "QPQQC", "QPQQD", "QQQQC", "QQQQD") ~ 1,
+    TRUE ~ 0
+  ))
+
+harvest_schedule = trees %>% 
+  filter(date > my(022023)) %>% 
+  filter(alive == 1) %>% 
+  filter(neighb_alive == 1) %>% 
+  mutate(trt_str = paste(seedling_sp, soil_type, neighb_sp, neighb_st, treatment, sep = "")) %>% 
+  mutate(sdlg = paste(seedling_sp, soil_type, sep = "")) %>% 
+  mutate(nb = paste(neighb_sp, neighb_st, sep = "")) %>% 
+  mutate(al_str = NaN)
+
+for(i in 1:length(harvest_schedule$al_str)){
+  hldvec =  sort(c(harvest_schedule$sdlg[i], harvest_schedule$nb[i]))
+  
+harvest_schedule$al_str[i] <- paste(hldvec[1], hldvec[2], harvest_schedule$treatment[i], sep = "")
+}
+  
+```
+
+
+```{r}
+schedule_check = harvest_schedule %>% 
+  group_by(seedling_sp, soil_type, neighb_sp, neighb_st, treatment, al_str, trt_str) %>% 
+  summarise(alive = sum(alive), dead = sum(dead), total = sum(dead+alive)) %>% 
+  filter(total>1)
+
+reps = schedule_check %>% 
+  filter(seedling_sp == neighb_sp)%>% 
+  filter(soil_type == neighb_st)
+
+unis = schedule_check %>% 
+  filter(!al_str %in% reps$al_str)
+
+fiveplus = unis %>% 
+  filter(total >4)
+set5 = harvest_schedule  %>% 
+  filter(al_str %in% fiveplus$al_str )
+set5 = set5[match(unique(set5$pot), set5$pot),]
+list_5 = set5 %>%
+  group_by(al_str) %>% 
+  sample_n(5) %>% 
+  mutate(both = "Yes")
+
+
+fouronly = unis %>% 
+  filter(total ==4)
+set4 = harvest_schedule  %>% 
+  filter(al_str %in% fouronly$al_str ) 
+set4 = set4[match(unique(set4$pot), set4$pot),]
+list_4 = set4 %>%
+  group_by(al_str) %>% 
+  sample_n(4) %>% 
+  mutate(both = "Yes")
+
+fourfive = bind_rows(list_5, list_4)
+
+repsset = reps %>% 
+  filter(total > 4)
+setrep = harvest_schedule  %>% 
+  filter(al_str %in% repsset$al_str )
+setrep = setrep[match(unique(setrep$pot), setrep$pot),]
+list_rep = setrep %>%
+  group_by(al_str) %>% 
+  sample_n(3) %>% 
+  mutate(both = "Yes")
+
+fourfiverep = bind_rows(fourfive, list_rep)
+
+sum = trees %>% 
+  filter(pot %in% fourfiverep$pot) %>%
+  mutate(trt_str = paste(seedling_sp, soil_type, neighb_sp, neighb_st, treatment, sep = "")) %>% 
+  group_by(trt_str) %>% 
+  summarise(n = n())
+
+#!schedule_check$trt_str %in% sum$trt_str
+
+last_living = harvest_schedule %>% 
+  filter(al_str %in% c("QQQQD", "PPPPD")) 
+
+last_living = last_living[match(unique(last_living$pot), last_living$pot),] 
+
+lasttwo = trees %>% 
+              mutate(trt_str = paste(seedling_sp, soil_type, neighb_sp, neighb_st, treatment, sep = "")) %>% 
+              filter(trt_str %in% c("QQQQD", "PPPPD")) %>% 
+  filter(alive == 1) %>% 
+  filter(neighb_alive == 0)
+
+lasttwo = lasttwo[match(unique(lasttwo$trt_str), lasttwo$trt_str),] 
+
+
+
+
+```
+
+
+```{r}
+manualset = harvest_schedule %>% 
+  filter(!seedling_id %in% fourfive) %>% 
+  filter(al_str%in% c("PCPQD", "QQQQD", "PPPPD"))
+manualset =   manualset[match(unique(manualset$al_str), manualset$al_str),]
+
+
+full_list = bind_rows(list_5, list_4, manualset)
+
+finaltwo = trees %>% 
+  filter(alive == 1) %>% 
+  filter(!seedling_id %in% full_list$seedling_id) %>% 
+  mutate(trt_str = paste(seedling_sp, soil_type, neighb_sp, neighb_st, treatment, sep = "")) %>% 
+  filter(trt_str %in% c("PCPQD", "PQPCD")) 
+finaltwo = finaltwo[match(unique(finaltwo$trt_str), finaltwo$trt_str),]
+  
+
+full_list = bind_rows(fourfiverep, last_living, lasttwo) 
+
+
+printer_sheet = full_list[match(unique(full_list$pot), full_list$pot),]
+
+
+
+write_csv(printer_sheet %>% 
+            select(pot, trt_str), here("data", "harvest_potlist.csv"))
+```
+
+```{r}
+tips = read_csv(here("data/harvest", "harvest_roottips - all.csv")) %>% 
+  select(1:3) %>% 
+  mutate(pct_col = case_when(
+    is.na(uncolonized) ~ 0, 
+    uncolonized == 0 ~ 0,
+    TRUE ~ colonized/(uncolonized+colonized)
+  )) %>%
+  mutate(seedling_id = as.numeric(seedling_id)) %>% 
+  left_join(trees %>% 
+              select(seedling_id, seedling_sp, soil_type, neighb_sp, neighb_st, treatment, alive) %>% 
+              mutate(seedling_id = as.numeric(seedling_id)))  
+  
+```
+
+
+```{r, warning=F}
+ggplot(tips %>% 
+         filter(seedling_sp == "P") %>% 
+         filter(alive == 1), aes(x = soil_type, y = pct_col, fill = treatment, color = treatment))+
+  geom_boxplot(alpha = 0.5) +
+  facet_grid(cols = vars(neighb_sp), rows = vars(neighb_st)) +
+  scale_fill_manual(values = c("lightblue", "darkgoldenrod1"), breaks = c("C", "D"), labels = c("Watered", "Droughted"))+
+  scale_color_manual(values = c("lightblue", "darkgoldenrod1"), breaks = c("C", "D"), labels = c("Watered", "Droughted")) +
+  geom_point(position=position_jitterdodge(), width = 0.005)+
+  theme_bw()+
+  ylim(0, 1)
+```
+
+
+```{r, warning=F}
+ggplot(tips %>% 
+         filter(seedling_sp == "P") %>% 
+         filter(alive == 0), aes(x = soil_type, y = pct_col, fill = treatment, color = treatment))+
+  geom_boxplot(alpha = 0.5) +
+  facet_grid(cols = vars(neighb_sp), rows = vars(neighb_st)) +
+  scale_fill_manual(values = c("lightblue", "darkgoldenrod1"), breaks = c("C", "D"), labels = c("Watered", "Droughted"))+
+  scale_color_manual(values = c("lightblue", "darkgoldenrod1"), breaks = c("C", "D"), labels = c("Watered", "Droughted")) +
+  geom_point(position=position_jitterdodge(), width = 0.005)+
+  theme_bw()+
+  ylim(0, 1)
+```
+
+```{r, warning=F}
+ggplot(tips %>% 
+         filter(seedling_sp == "Q") %>% 
+         filter(alive == 1), aes(x = soil_type, y = pct_col, fill = treatment, color = treatment))+
+  geom_boxplot(alpha = 0.5) +
+  facet_grid(cols = vars(neighb_sp), rows = vars(neighb_st)) +
+  scale_fill_manual(values = c("lightblue", "darkgoldenrod1"), breaks = c("C", "D"), labels = c("Watered", "Droughted"))+
+  scale_color_manual(values = c("lightblue", "darkgoldenrod1"), breaks = c("C", "D"), labels = c("Watered", "Droughted")) +
+  geom_point(position=position_jitterdodge(), width = 0.005)+
+  theme_bw()+
+  ylim(0, 1)
+```
+
+
+```{r, warning=F}
+ggplot(tips %>% 
+         filter(seedling_sp == "Q") %>% 
+         filter(alive == 0), aes(x = soil_type, y = pct_col, fill = treatment, color = treatment))+
+  geom_boxplot(alpha = 0.5) +
+  facet_grid(cols = vars(neighb_sp), rows = vars(neighb_st)) +
+  scale_fill_manual(values = c("lightblue", "darkgoldenrod1"), breaks = c("C", "D"), labels = c("Watered", "Droughted"))+
+  scale_color_manual(values = c("lightblue", "darkgoldenrod1"), breaks = c("C", "D"), labels = c("Watered", "Droughted")) +
+  geom_point(position=position_jitterdodge(), width = 0.005)+
+  theme_bw()+
+  ylim(0, 1)
+```
+
+
+```{r}
+pressure = read_csv(here("data/harvest", "pressure_bomb - Sheet1.csv")) %>% 
+  clean_names() %>% 
+  select(!notes) %>% 
+  left_join(trees) %>% 
+  filter(!is.na(height_cm)) %>% 
+  mutate(pressure_mpa = as.numeric(pressure_mpa)) %>% 
+  left_join(tips) %>% 
+  mutate(time = str_sub(time, 1,1)) %>% 
+  mutate(time = tolower(time)) %>% 
+  pivot_wider(values_from = pressure_mpa, names_from = time) %>% 
+  mutate(diff_pressure = m-p)
+  
+
+ggplot(pressure, aes(x = soil_type, y = m, fill = treatment, color = treatment))+
+  geom_boxplot(alpha = 0.5)+
+  geom_point(position = position_jitterdodge(), alpha = 0.5)+
+  scale_fill_manual(values = c("lightblue", "darkgoldenrod1"), breaks = c("C", "D"), labels = c("Watered", "Droughted"))+
+  scale_color_manual(values = c("lightblue", "darkgoldenrod1"), breaks = c("C", "D"), labels = c("Watered", "Droughted"))+
+  facet_grid(cols = vars(seedling_sp))
+
+
+ggplot(pressure, aes(y = diff_pressure, x = pct_col, color = treatment))+
+  geom_point()+
+  facet_wrap(~seedling_sp)+
+  scale_color_manual(values = c("lightblue", "darkgoldenrod1"), breaks = c("C", "D"), labels = c("Watered", "Droughted"))+
+  theme_bw()+ geom_smooth(method = "lm", se = F)+
+  xlim(0.01, 1)
+```
+
+
+

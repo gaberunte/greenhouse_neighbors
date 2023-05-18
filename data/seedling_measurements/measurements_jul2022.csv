@@ -1,4 +1,4 @@
-seedling_id,height_cm,additional_height,diameter_mm,chlorosis,leaf_count,
+seedling_id,height_cm,branching,diameter_mm,chlorosis,leaf_count,notes
 3933,7.1,16.5,2.4,3,,
 3245,5,3.5,2,3,,
 4243,8.7,10.3,2.3,4,,

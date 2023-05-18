@@ -1,0 +1,81 @@
+---
+title: "Seedling sizing GHEcto"
+author: "Gabe Runte"
+date: "2023-03-12"
+output: html_document
+---
+
+```{r setup, include=FALSE, message = F}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(here)
+library(janitor)
+library(lubridate)
+```
+
+```{r}
+mar2021 = read_csv(here("data", "seedling_measurements", "measurements_mar2021.csv")) %>% 
+  clean_names() %>% 
+  mutate(date = my("mar2021"))
+
+apr2021 = read_csv(here("data", "seedling_measurements", "measurements_mar2021.csv")) %>% 
+  clean_names() %>% 
+  mutate(date = my("apr2021"))
+
+dec2021 = read_csv(here("data", "seedling_measurements", "measurements_dec2021.csv")) %>% 
+  clean_names() %>% 
+  mutate(date = my("dec2021"))
+
+feb2022 = read_csv(here("data", "seedling_measurements", "measurements_feb2022.csv")) %>% 
+  clean_names() %>% 
+  mutate(date = my("feb2022"))
+
+apr2022 = read_csv(here("data", "seedling_measurements", "measurements_apr2022.csv")) %>% 
+  clean_names() %>% 
+  mutate(date = my("apr2022"))
+
+jul2022 = read_csv(here("data", "seedling_measurements", "measurements_jul2022.csv")) %>% 
+  clean_names() %>% 
+  mutate(date = my("jul2022"))
+
+mar2023 = read_csv(here("data", "seedling_measurements", "measurements_mar2023.csv")) %>% 
+  clean_names() %>% 
+  mutate(date = my("mar2023"))
+
+size = bind_rows(mar2021, apr2021, dec2021, feb2022, apr2022, jul2022, mar2023)%>% 
+  mutate(alive = case_when(
+    chlorosis == 0 ~ 0,
+    notes %in% c("Brown", "brown", "b") ~ 0,
+    TRUE ~ 1))
+
+sd_treat = read_csv(here("data", "seedling_measurements.csv")) %>% 
+  clean_names() %>%  dplyr::select(seedling_id, seedling_sp, soil_type) 
+
+sd_treat = sd_treat[match(unique(sd_treat$seedling_id), sd_treat$seedling_id),]
+
+pairs = read_csv(here("data", "ghecto_neighbor_pairs.csv"))
+
+neighbors = tibble(seedling_id = c(pairs$seedling_1, pairs$seedling_2)) %>% 
+  mutate(neighbor = c(pairs$seedling_2, pairs$seedling_1)) %>% 
+  mutate(pot = rep(pairs$pot, 2))
+
+size_treat = size %>% 
+  left_join(sd_treat)
+size_n = size_treat %>% 
+  filter(date > my("apr2021")) %>% 
+  left_join(neighbors) %>% 
+  left_join(sd_treat %>% 
+              rename(neighbor = seedling_id, neighb_sp = seedling_sp, neighb_st = soil_type)) %>% 
+  bind_rows(size_treat %>% 
+              filter(date<= my("apr2021")))
+
+size_n_long = size_n %>% 
+  left_join(size_n %>% 
+              filter(date > my("feb2023")) %>% 
+              dplyr::select(seedling_id, alive)  %>% 
+              rename(neighbor = seedling_id, neighb_alive = alive))
+
+write_csv(size_n_long, here("data", "seedling_measurements", "size_master.csv"))
+```
+

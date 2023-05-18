@@ -13,9 +13,9 @@ library(janitor)
 library(vegan)
 library(tidyverse)
 library(bioseq)
-library(phyloseq)
-library(kmer)
-library(dada2)
+#library(phyloseq)
+#library(kmer)
+#library(dada2)
 ```
 
 

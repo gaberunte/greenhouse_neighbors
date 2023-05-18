@@ -20,11 +20,11 @@ library(indicspecies)
 #Datasets
 ```{r datasets, message=FALSE, warning=FALSE}
 #reading in data
-taxon.path <- read_csv(here('data', 'otu_unite_repotting.csv'))%>%  # taxon path output from UNITE 
+taxon.path <- read_csv(here('data', "illumina_data", 'otu_unite_repotting.csv'))%>%  # taxon path output from UNITE 
   clean_names() %>% 
   dplyr::rename(sequence = x1)
 
-funguilds <- read_csv(here('data','otu_unite_repotting_forfunguild.guilds.csv')) %>%  # guild data output from FUNGuild
+funguilds <- read_csv(here('data', 'funguild_docs','otu_unite_repotting_forfunguild.guilds.csv')) %>%  # guild data output from FUNGuild
  clean_names() %>% 
   dplyr::rename(sequence = x1) %>% 
   select(!taxonomy) 
@@ -32,7 +32,7 @@ funguilds <- read_csv(here('data','otu_unite_repotting_forfunguild.guilds.csv'))
 guilds_taxonomy = funguilds %>% 
   left_join(taxon.path, by = "sequence")
 
-otu_clusters = read_csv(here("data", "repotting_clusters.csv")) %>% 
+otu_clusters = read_csv(here("data", "sanger_data", "repotting_clusters.csv")) %>% 
   rename(asv =...1, otu = cluster)
 
 funguilds_otu = funguilds %>%

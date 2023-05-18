@@ -1,0 +1,148 @@
+---
+title: "image processing"
+author: "Gabe Runte"
+date: "2023-05-16"
+output: html_document
+---
+
+```{r setup, include=FALSE, messgage = F}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(here)
+library(janitor)
+library(magick)
+library(tidyverse)
+```
+
+
+```{r}
+# Function to Convert Image to Black and White and Count Black Pixels
+bw_conversion_and_count <- function(image_path) {
+  # Reading the Image
+  img <- image_read(image_path)
+  # Changing the levels in the image to increase contrast
+  img_mod = img %>% image_modulate( brightness = 150, saturation = 175, hue = 150)
+  # Converting the Image to Grayscale
+  img_gray <- img_mod %>% image_convert(colorspace = "gray")
+  # Converting the Image to Black and White
+  img_bw <- img_gray %>% image_threshold("black", "50%")
+  # Extracting Image Data
+  img_data <- image_data(img_bw)
+  # Counting Black Pixels
+  black_pixels <- sum(img_data <= 1)  # You can adjust this threshold as necessary
+  return(black_pixels)
+}
+
+bw_conversion <- function(img, files, path.out) {
+  # Changing the levels in the image to increase contrast
+  img_mod = img %>% image_modulate( brightness = 175)#, saturation = 175, hue = 150)
+  # Converting the Image to Grayscale
+  img_gray <- img_mod %>% image_convert(colorspace = "gray")
+  # Converting the Image to Black and White
+  img_bw <- img_gray %>% image_threshold("black", "80%")
+  image_write(img_bw, paste(path.out, files, sep= "/"))
+  return(img_bw)
+}
+bw_pixelcount <- function(image){
+  img_data <- image_data(image)
+  # Counting Black Pixels
+  black_pixels <- sum(img_data <= 1)  # You can adjust this threshold as necessary
+  return(black_pixels)
+}
+
+```
+
+```{r}
+drought = read_csv(here("data", "drought_treatments.csv")) %>% 
+  rename(drought_treat=treatment)
+
+size_master = read_csv(here("data", "seedling_measurements", "size_master.csv")) %>% 
+  mutate(length = case_when(
+    !is.na(branching) ~ branching + height_cm,
+    .default = height_cm)) %>% 
+  left_join(drought) %>% 
+  filter(date == "2023-03-01") %>% 
+  select(seedling_id, seedling_sp, soil_type)
+
+path.in = here("scans") #where are the raw photos? 
+files = list.files(path.in)
+
+img_tib = tibble(files) %>% 
+  mutate(seedling_id = as.numeric(str_sub(files, 1,4))) %>% 
+  mutate(plant_compartment = str_sub(files, 6,6)) %>%
+  left_join(size_master)
+```
+
+```{r, eval = F}
+path.out = here("scans_bw", "oak_aboveground") # Where shall we put the edited photos? 
+
+qa_img = img_tib %>% 
+  filter(plant_compartment == "A") %>% 
+  filter(seedling_sp == "Q") %>% 
+  mutate(image = map(files, ~ image_read(paste(path.in, .x, sep ="/")))) %>%
+  mutate(bw_image = map2(.x=image, .y = files, ~ bw_conversion(.x, .y, path.out))) %>%
+  mutate(blk_pixels = map_dbl(bw_image, ~bw_pixelcount(.x))) %>%
+  mutate(area = blk_pixels/(300*300*2.54*2.54)) #300dpi > in^2 > cm^2
+
+```
+
+```{r}
+path.out = here("scans_bw", "oak_foliar") # Where shall we put the edited photos? 
+
+qf_img = img_tib %>% 
+  filter(plant_compartment == "F") %>% 
+  filter(seedling_sp == "Q") %>% 
+  mutate(image = map(files, ~ image_read(paste(path.in, .x, sep ="/")))) %>%
+  mutate(bw_image = map2(.x=image, .y = files, ~ bw_conversion(.x, .y, path.out))) %>%
+  mutate(blk_pixels = map_dbl(bw_image, ~bw_pixelcount(.x))) %>%
+  mutate(area = blk_pixels/(300*300*2.54*2.54))
+```
+
+```{r}
+path.out = here("scans_bw", "oak_belowground") # Where shall we put the edited photos? 
+
+qb_img = img_tib %>% 
+  filter(plant_compartment == "B") %>% 
+  filter(seedling_sp == "Q") %>% 
+  mutate(image = map(files, ~ image_read(paste(path.in, .x, sep ="/")))) %>%
+  mutate(bw_image = map2(.x=image, .y = files, ~ bw_conversion(.x, .y, path.out))) %>%
+  mutate(blk_pixels = map_dbl(bw_image, ~bw_pixelcount(.x))) %>%
+  mutate(area = blk_pixels/(300*300*2.54*2.54))
+```
+
+```{r, eval = F}
+path.out = here("scans_bw", "fir_aboveground") # Where shall we put the edited photos? 
+
+pa_img = img_tib %>% 
+  filter(plant_compartment == "A") %>% 
+  filter(seedling_sp == "P") %>% 
+  mutate(image = map(files, ~ image_read(paste(path.in, .x, sep ="/")))) %>%
+  mutate(bw_image = map2(.x=image, .y = files, ~ bw_conversion(.x, .y, path.out))) %>%
+  mutate(blk_pixels = map_dbl(bw_image, ~bw_pixelcount(.x))) %>%
+  mutate(area = blk_pixels/(300*300*2.54*2.54))
+```
+
+```{r}
+path.out = here("scans_bw", "fir_foliar") # Where shall we put the edited photos? 
+
+
+pf_img = img_tib %>% 
+  filter(plant_compartment == "F") %>% 
+  filter(seedling_sp == "P") %>% 
+  mutate(image = map(files, ~ image_read(paste(path.in, .x, sep ="/")))) %>%
+  mutate(bw_image = map2(.x=image, .y = files, ~ bw_conversion(.x, .y, path.out))) %>%
+  mutate(blk_pixels = map_dbl(bw_image, ~bw_pixelcount(.x))) %>%
+  mutate(area = blk_pixels/(300*300*2.54*2.54))
+```
+
+```{r}
+path.out = here("scans_bw", "fir_belowground") # Where shall we put the edited photos? 
+
+pb_img = img_tib %>% 
+  filter(plant_compartment == "B") %>% 
+  filter(seedling_sp == "P") %>% 
+  mutate(image = map(files, ~ image_read(paste(path.in, .x, sep ="/")))) %>%
+  mutate(bw_image = map2(.x=image, .y = files, ~ bw_conversion(.x, .y, path.out))) %>%
+  mutate(blk_pixels = map_dbl(bw_image, ~bw_pixelcount(.x))) %>%
+  mutate(area = blk_pixels/(300*300*2.54*2.54))
+```
