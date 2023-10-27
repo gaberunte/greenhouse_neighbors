@@ -1,0 +1,83 @@
+---
+title: "Dissected samples plate processing"
+author: "Gabe Runte"
+date: "2023-02-09"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(here)
+```
+
+```{r}
+
+
+gel_to_seq = function(pass_string, ghecto_plate, n_samples = 96, new_plate_start, start_at = 0, multichannel = T){
+  
+  if(multichannel == T){
+    
+    plateorder = c(rep(c(1, 2), 8), rep(c(3, 4), 8),rep(c(5, 6), 8), 
+  rep(c(7, 8), 8),rep(c(9, 10), 8),rep(c(11, 12), 8))
+  } else{plateorder = rep(1:12, each = 8)}
+  
+  plateorder = plateorder[1:n_samples]
+  
+  sampleset = tibble(pass_string, column = plateorder) %>% 
+    arrange(column) %>% 
+    mutate(well = rep(LETTERS[seq(1, 8)], 12)) %>% 
+    filter(pass_string == 1) %>% 
+    mutate(position = start_at + seq(0:(length(pass_string)-1))) %>% 
+    rename(amp_success = pass_string, old_well = well, old_column = column)
+    
+  
+  newplate = tibble(
+    new_column = rep(rep(1:12, each = 8), 2),
+    new_row = rep(rep(LETTERS[seq(1, 8)], 12), 2), 
+    position = seq(1:192)) %>% 
+    mutate(new_plate = c(rep(paste("dmc_", new_plate_start, sep = ""), 96), 
+                     rep(paste("dmc_", new_plate_start+1, sep = ""), 96)),
+           ghecto_plate = ghecto_plate) %>% 
+    right_join(sampleset) %>% 
+    select(!position)
+  
+  return(newplate)
+}
+
+```
+
+```{r}
+
+#updated reading
+morpho5 = c(
+          0,0,0,0,0,1,0,1,1,1,1,1,0,0,1,1,0,0,0,1,1,1,1,1,
+          1,1,1,1,1,1,1,0,1,1,1,1,1,0,1,1,0,1,1,1,1,1,1,1,
+          0,0,1,0,1,0,1,1,0,1,1,1,1,0,1,1,1,0,1,0,0,0,1,0,
+          0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+)
+
+
+firstset = gel_to_seq(morpho5, start_at = 1, new_plate_start = 1, ghecto_plate = "morpho5")
+#write_csv(firstset, here("data", "dissected_pcrsuccesses_morpho5.csv"))
+
+
+morpho5_full = tibble(
+    old_column = rep(1:12, each = 8),
+    old_well = rep(LETTERS[seq(1, 8)], 12)) %>% 
+  left_join(firstset) %>% 
+  mutate(position = 1:96) %>% 
+  filter(position <=67) # only had samples through 9C (then +/- controls)
+
+retry_morpho5 = morpho5_full %>% 
+  filter(is.na(amp_success)) %>% 
+  rename(column = old_column) %>% 
+  rename(row = old_well) %>% 
+  select(column, row)
+
+#write_csv(retry_morpho5, here("data", "retry_morpho5.csv"))
+
+```
+
+

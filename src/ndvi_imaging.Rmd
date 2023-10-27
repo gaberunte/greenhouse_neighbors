@@ -8,6 +8,7 @@ library(tidyverse)
 library(here)
 library(janitor)
 ```
+
 ```{r}
 ndvi1 = read_csv(here("data", "ndvi", "NDVI_means_07.csv")) %>% 
   clean_names() %>% 
@@ -24,22 +25,22 @@ ndvi = ndvi1 %>%
 
 
 ```{r}
-seedlings = read_csv(here("data", "seedling_measurements.csv")) %>%
+seedlings = read_csv(here("data", "seedling_measurements/seedling_measurements.csv")) %>%
   clean_names() %>% 
   filter(timepoint == 1) %>% 
   select(seedling_id, seedling_sp, soil_type)
 
-potting = read_csv(here("data", "ghecto_neighbor_pairs.csv")) %>% 
+potting = read_csv(here("data", "design/ghecto_neighbor_pairs.csv")) %>% 
   clean_names() %>% 
   pivot_longer(cols = 2:3, names_to = "gone", values_to = "seedling_id") %>% 
   select(!gone)
-drought = read_csv(here("data", "drought_assignments_bypot.csv")) %>% 
+drought = read_csv(here("data", "design/drought_assignments_bypot.csv")) %>% 
   select(!pair) %>% 
   left_join(potting)
-neighbora = read_csv(here("data", "ghecto_neighbor_pairs.csv")) %>% 
+neighbora = read_csv(here("data", "design/ghecto_neighbor_pairs.csv")) %>% 
   clean_names()%>% 
   rename(neighbor = seedling_2, seedling_id = seedling_1)
-neighborb = read_csv(here("data", "ghecto_neighbor_pairs.csv")) %>% 
+neighborb = read_csv(here("data", "design/ghecto_neighbor_pairs.csv")) %>% 
   clean_names()%>% 
   rename(neighbor = seedling_1, seedling_id = seedling_2)
 neighbors = neighbora %>% 
@@ -117,7 +118,8 @@ t.test(m~drought, data = ndvi.oaks %>%
 t.test(m~drought, data = ndvi.oaks %>% 
          filter(timepoint == 1))
 
-#TukeyHSD(aov(m~drought*seedling_sp*soil_type, data = mt))
+TukeyHSD(aov(m~drought+seedling_sp*soil_type, data = mt%>% 
+         filter(timepoint == 2)))
 ```
 
 ```{r}

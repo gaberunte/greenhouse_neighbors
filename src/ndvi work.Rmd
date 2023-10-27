@@ -23,14 +23,14 @@ library(indicspecies)
 
 ```{r metadata stuff}
 #just before repotting
-seedling_size = read_csv(here("data", "ghecto_repotting_seedling_data.csv")) %>% 
+seedling_size = read_csv(here("data", "repotting/ghecto_repotting_seedling_data.csv")) %>% 
   mutate(timepoint = "3")
-t3 = read_csv(here("data", "ghecto_repotting_seedling_data.csv")) %>% 
+t3 = read_csv(here("data", "repotting/ghecto_repotting_seedling_data.csv")) %>% 
   mutate(timepoint = "3")%>% 
   mutate(month = lubridate::my(032021))
 
 #from the grow up in year 1 before repotting
-seedlings = read_csv(here("data", "seedling_measurements.csv")) %>%
+seedlings = read_csv(here("data", "seedling_measurements/seedling_measurements.csv")) %>%
   clean_names()
 
 seedlings = seedlings[(match(unique(seedlings$seedling_id), seedlings$seedling_id)),]%>% 
@@ -44,24 +44,24 @@ post_repotting = read_csv(here("data", "post_repotting_measurements.csv")) %>%
 t4 = post_repotting %>% 
   mutate(month = lubridate::my(042021))
 
-t5 = read_csv(here("data", "seedling_data_timepoint5.csv")) %>%
+t5 = read_csv(here("data", "seedling_measurements/seedling_data_timepoint5.csv")) %>%
   clean_names() %>% 
   mutate(timepoint = "5")%>% 
   mutate(month = lubridate::my(122021))
 
-t6 = read_csv(here("data", "seedling_measurements_winter22.csv")) %>%
+t6 = read_csv(here("data", "seedling_measurements/seedling_measurements_winter22.csv")) %>%
   clean_names() %>% 
   mutate(timepoint = "6")%>% 
   mutate(month = lubridate::my(022022))
 
-t7 = read_csv(here("data", "measurements_april2022.csv")) %>% 
+t7 = read_csv(here("data", "seedling_measurements/measurements_april2022.csv")) %>% 
   clean_names() %>% 
   rename(additional_height = add_height)%>% 
   mutate(timepoint = "7")%>% 
   mutate(month = lubridate::my(042022))
 
 #which seedling was paired with which other seedling? they share a pot number 
-potting = read_csv(here("data", "ghecto_neighbor_pairs.csv")) %>% 
+potting = read_csv(here("data", "design/ghecto_neighbor_pairs.csv")) %>% 
   clean_names()
 
 seedling_sizes = t3 %>% 
@@ -130,7 +130,7 @@ master7 = master7 %>%
   mutate(is.ecto = soil_type %in% c("P", "Q")) %>% 
   mutate(neighb.ecto = neighb.soil %in% c("P", "Q"))
 
-ndvi = read_csv(here("data", "NDVI_means_07.xlsx - Sheet 1.csv"))  %>% 
+ndvi = read_csv(here("data", "ndvi/NDVI_means_07.xlsx - Sheet 1.csv"))  %>% 
   clean_names() %>% 
   left_join(master7 ) %>% 
   rename(ndvi = m) %>% 

@@ -1,0 +1,118 @@
+---
+title: "Untitled"
+author: "Gabe Runte"
+date: "9/29/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(vegan)
+library(here)
+library(janitor)
+library(gridExtra)
+library(RColorBrewer)
+
+```
+
+First, I will pull in all of the sequences that I want to assign taxonomy to. Workflow is as follows:
+1. Pull all of the consensus sequences
+2. Combine with list of sequences not assigned to a contig
+3. Map these onto the total list of sequences, allowing one to then remove samples with short sequences or with <2% high quality bp reads
+4. Create final list of sequences to be assigned taxonomy
+```{r, message = F}
+consensus = read_csv(here("data/harvest/morpho5x", "consensus.csv")) %>% 
+  clean_names() %>% 
+  dplyr::select(name, sequence) %>% 
+  rename(sequence_list_name = name)
+
+contig_assign = read_csv(here("data/harvest/morpho5x", "contigs.csv")) %>% 
+  clean_names() %>% 
+  rename(contig_sequence = sequence) %>% 
+  left_join(consensus)
+
+metadata = read_csv(here("data/harvest/morpho5x", "all_reads.csv")) %>% 
+  clean_names() %>% 
+  rename(original_seq = sequence) %>% 
+  select(!sequence_list_name) %>% 
+  left_join(contig_assign) %>% 
+  mutate(sequence = case_when(
+    is.na(sequence_list_name) ~ original_seq,
+    !is.na(sequence_list_name) ~ sequence
+  )) %>% 
+  select(!original_seq)%>% 
+  select(!contig_sequence) %>% 
+  filter(!is.na(sequence)) %>% 
+  filter(post_trim_length>75)
+```
+
+
+
+```{r, eval = FALSE}
+unite.ref <- "/Users/Gabe/Desktop/phd/ghecto/unite_db/sh_general_release_s_10.05.2021/sh_general_release_dynamic_s_10.05.2021.fasta"
+unique_sequences = unique(metadata$sequence)
+tiptaxa = dada2::assignTaxonomy(unique_sequences, unite.ref, multithread = TRUE, tryRC = TRUE)
+
+
+unite_taxa = tibble(as.data.frame(tiptaxa)) %>% 
+  mutate(sequence = rownames(tiptaxa))
+write_csv(unite_taxa, here("data/harvest/morpho5x", "unite_output.csv"))
+```
+
+
+```{r}
+unite_taxa = read_csv(here("data/harvest/morpho5x", "unite_output.csv")) 
+sample_sheet = read_csv(here("data/harvest", "harvest_tipseq_printout.csv")) %>% 
+  select(-plate, -column, -row)
+seedlings = read_csv(here("data/analysis","size_master.csv" )) %>% 
+  select(seedling_id, seedling_sp, soil_type, neighb_sp, neighb_st) %>% 
+  distinct() %>% 
+  filter(!is.na(neighb_sp))
+
+tip_seqs = metadata %>% 
+  left_join(unite_taxa) %>% 
+  clean_names() %>% 
+  separate(name, into = c("project", "sampleset", "comb_column", "comb_row")) %>% 
+  mutate(comb_column = as.numeric(comb_column)) %>% 
+  select(-project, -sampleset) %>% 
+  left_join(sample_sheet) %>% 
+  left_join(seedlings) %>% 
+  filter(!is.na(seedling_sp))%>% 
+  mutate(tree_div = case_when(
+    seedling_sp == neighb_sp ~1,
+    .default = 2
+  ))
+
+
+```
+
+```{r}
+
+ggplot(tip_seqs, aes(x = morphotype, fill = genus))+
+  geom_bar()+
+  facet_wrap(~seedling_sp)
+
+
+
+```
+
+Planning out which morphotypes to target:
+A - Pustularia (5 more)
+B - Tuber (5 more)
+C - Unknown (10 more) - might not be doable 
+D - Unknown (10 more)
+E - Unknown (10 more)
+F - Pustularia (5 more)
+G - Pustularia (5 more)
+H - Possibly melanogaster (10 more)
+o - Pustularia if nothing else...
+W - Pustularia (5 more)
+X - Pustularia (5 more)
+Y - Non ecto - off the list
+Z - Lasiobolidium or pustularia
+
+Gameplan will be to sequence 5 more of each of the morphotypes we are confident on. The rest, I will pursue in sets of 10 sequences. This includes getting a rate of amplification success for the 'O' morphotype. 
+
+

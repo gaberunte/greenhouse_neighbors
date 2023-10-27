@@ -15,6 +15,8 @@ library(tidyverse)
 ```
 
 
+## Writing functions
+
 ```{r}
 # Function to Convert Image to Black and White and Count Black Pixels
 bw_conversion_and_count <- function(image_path) {
@@ -52,6 +54,8 @@ bw_pixelcount <- function(image){
 
 ```
 
+## Read in relevant metadata and list files to be worked with
+
 ```{r}
 drought = read_csv(here("data", "drought_treatments.csv")) %>% 
   rename(drought_treat=treatment)
@@ -73,6 +77,9 @@ img_tib = tibble(files) %>%
   left_join(size_master)
 ```
 
+## Break out samples into manageable sizes for fluidity of computation
+Below are a set of repeated workflows for each species x compartment combination. 
+
 ```{r, eval = F}
 path.out = here("scans_bw", "oak_aboveground") # Where shall we put the edited photos? 
 
@@ -84,6 +91,10 @@ qa_img = img_tib %>%
   mutate(blk_pixels = map_dbl(bw_image, ~bw_pixelcount(.x))) %>%
   mutate(area = blk_pixels/(300*300*2.54*2.54)) #300dpi > in^2 > cm^2
 
+qa_img_save = qa_img %>% 
+  select(1:5, 8,9)
+
+write_csv(qa_img_save, here("data", "image_processing", "qa_images.csv"))
 ```
 
 ```{r}
@@ -96,6 +107,11 @@ qf_img = img_tib %>%
   mutate(bw_image = map2(.x=image, .y = files, ~ bw_conversion(.x, .y, path.out))) %>%
   mutate(blk_pixels = map_dbl(bw_image, ~bw_pixelcount(.x))) %>%
   mutate(area = blk_pixels/(300*300*2.54*2.54))
+
+qf_img_save = qf_img %>% 
+  select(1:5, 8,9)
+
+write_csv(qf_img_save, here("data", "image_processing", "qf_images.csv"))
 ```
 
 ```{r}
@@ -108,6 +124,11 @@ qb_img = img_tib %>%
   mutate(bw_image = map2(.x=image, .y = files, ~ bw_conversion(.x, .y, path.out))) %>%
   mutate(blk_pixels = map_dbl(bw_image, ~bw_pixelcount(.x))) %>%
   mutate(area = blk_pixels/(300*300*2.54*2.54))
+
+qb_img_save = qb_img %>% 
+  select(1:5, 8,9)
+
+write_csv(qb_img_save, here("data", "image_processing", "qb_images.csv"))
 ```
 
 ```{r, eval = F}
@@ -120,6 +141,11 @@ pa_img = img_tib %>%
   mutate(bw_image = map2(.x=image, .y = files, ~ bw_conversion(.x, .y, path.out))) %>%
   mutate(blk_pixels = map_dbl(bw_image, ~bw_pixelcount(.x))) %>%
   mutate(area = blk_pixels/(300*300*2.54*2.54))
+
+pa_img_save = pa_img %>% 
+  select(1:5, 8,9)
+
+write_csv(pa_img_save, here("data", "image_processing", "pa_images.csv"))
 ```
 
 ```{r}
@@ -133,6 +159,11 @@ pf_img = img_tib %>%
   mutate(bw_image = map2(.x=image, .y = files, ~ bw_conversion(.x, .y, path.out))) %>%
   mutate(blk_pixels = map_dbl(bw_image, ~bw_pixelcount(.x))) %>%
   mutate(area = blk_pixels/(300*300*2.54*2.54))
+
+pf_img_save = pf_img %>% 
+  select(1:5, 8,9)
+
+write_csv(pf_img_save, here("data", "image_processing", "pf_images.csv"))
 ```
 
 ```{r}
@@ -145,4 +176,57 @@ pb_img = img_tib %>%
   mutate(bw_image = map2(.x=image, .y = files, ~ bw_conversion(.x, .y, path.out))) %>%
   mutate(blk_pixels = map_dbl(bw_image, ~bw_pixelcount(.x))) %>%
   mutate(area = blk_pixels/(300*300*2.54*2.54))
+
+pb_img_save = pb_img %>% 
+  select(1:5, 8,9)
+
+write_csv(pb_img_save, here("data", "image_processing", "pb_images.csv"))
 ```
+
+## Repeat the above process for images taken by collaborators working to collect water potentials
+
+```{r}
+
+path.in = here("wp_scans") #where are the raw photos? 
+files = list.files(path.in)
+
+img_tib = tibble(files) %>% 
+  mutate(seedling_id = as.numeric(str_sub(files, 1,4))) %>% 
+  mutate(plant_compartment = str_sub(files, 6,6)) %>%
+  left_join(size_master)
+```
+
+```{r}
+path.out = here("scans_bw", "oak_wp") # Where shall we put the edited photos? 
+
+qw_img = img_tib %>% 
+  filter(seedling_sp == "Q") %>% 
+  mutate(image = map(files, ~ image_read(paste(path.in, .x, sep ="/")))) %>%
+  mutate(bw_image = map2(.x=image, .y = files, ~ bw_conversion(.x, .y, path.out))) %>%
+  mutate(blk_pixels = map_dbl(bw_image, ~bw_pixelcount(.x))) %>%
+  mutate(area = blk_pixels/(300*300*2.54*2.54)) #300dpi > in^2 > cm^2
+
+qw_img_save = qw_img %>% 
+  select(1:5, 8,9)
+
+write_csv(qw_img_save, here("data", "image_processing", "qw_images.csv"))
+```
+
+```{r}
+path.out = here("scans_bw", "fir_wp") # Where shall we put the edited photos? 
+
+pw_img = img_tib %>% 
+  filter(seedling_sp == "P") %>% 
+  mutate(image = map(files, ~ image_read(paste(path.in, .x, sep ="/")))) %>%
+  mutate(bw_image = map2(.x=image, .y = files, ~ bw_conversion(.x, .y, path.out))) %>%
+  mutate(blk_pixels = map_dbl(bw_image, ~bw_pixelcount(.x))) %>%
+  mutate(area = blk_pixels/(300*300*2.54*2.54)) #300dpi > in^2 > cm^2
+
+pw_img_save = pw_img %>% 
+  select(1:5, 8,9)
+
+write_csv(pw_img_save, here("data", "image_processing", "pw_images.csv"))
+```
+
+
+See file image_data.Rmd for a workflow to combine all written csv files into a single dataset. 

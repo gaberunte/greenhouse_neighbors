@@ -1,0 +1,219 @@
+---
+title: "Untitled"
+author: "Gabe Runte"
+date: "2023-07-25"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(here)
+library(janitor)
+library(patchwork)
+
+```
+
+
+```{r}
+mass = read_csv(here("data/harvest/harvest_biomass.csv")) %>% 
+  select(1:3) %>% 
+  mutate(plant_compartment = case_when(
+    compartment == "A" ~ "aboveground",
+    compartment == "B" ~ "belowground",
+    compartment == "F" ~ "foliar",
+    compartment == "P" ~ "predawn_stem",
+    compartment == "G" ~ "predawn_foliar",
+    compartment == "M" ~ "midday_stem",
+    compartment == "H" ~ "midday_foliar",
+    )) %>% 
+  filter(!is.na(plant_compartment)) %>% 
+  clean_names() %>% 
+  rename(seedling_id = plant_id) %>% 
+  filter(mass < 1000) %>% 
+  distinct(seedling_id, compartment)
+
+drought = read_csv(here("data", "drought_treatments.csv")) %>% 
+  rename(drought_treat=treatment)
+  
+size_master = read_csv(here("data", "seedling_measurements", "size_master.csv")) %>% 
+  mutate(length = case_when(
+    !is.na(branching) ~ branching + height_cm,
+    .default = height_cm)) %>% 
+  left_join(drought)
+
+harvests = size_master %>% 
+  filter(date == "2023-03-01") %>% 
+  select(seedling_id, seedling_sp, soil_type, neighb_sp, neighb_st, drought_treat)
+
+seedling_area = read_csv(here("data", "harvest_imagedata.csv")) %>% 
+  mutate(plant_compartment = case_when(
+    plant_compartment == "A" ~ "aboveground",
+    plant_compartment == "B" ~ "belowground",
+    plant_compartment == "FALSE" ~ "foliar",
+    plant_compartment == "P" ~ "predawn_stem",
+    plant_compartment == "G" ~ "predawn_foliar",
+    plant_compartment == "M" ~ "midday_stem",
+    plant_compartment == "H" ~ "midday_foliar",
+    )) %>% 
+  select(!blk_pixels) %>% 
+  select(!files)
+
+sapwood = read_csv(here("data/harvest/harvest_sapwood.csv")) %>% 
+  mutate(sapwood_area = pi*(sapwood_diameter/2)^2)
+
+
+master = harvests %>% 
+  left_join(mass) %>% 
+  left_join(seedling_area) %>% 
+  left_join(sapwood)
+```
+
+```{r, warning = F}
+
+bc_a = ggplot(master %>% 
+         filter(compartment =="A") %>% 
+         filter(seedling_sp == "P"), aes(x = mass, y = area, color = soil_type))+
+  geom_point()+labs(title= "Bigcone above-ground")
+
+bc_f = ggplot(master %>% 
+         filter(compartment =="F") %>% 
+         filter(seedling_sp == "P"), aes(x = mass, y = area, color = soil_type))+
+  geom_point()+labs(title= "Bigcone foliar")
+
+
+bc_b = ggplot(master %>% 
+         filter(compartment =="B") %>% 
+         filter(seedling_sp == "P"), aes(x = mass, y = area, color = soil_type))+
+  geom_point()+labs(title= "Bigcone below-ground")
+
+
+ok_a = ggplot(master %>% 
+         filter(compartment =="A") %>% 
+         filter(seedling_sp == "Q"), aes(x = mass, y = area, color = soil_type))+
+  geom_point()+labs(title= "Oak above-ground")
+
+ok_f = ggplot(master %>% 
+         filter(compartment =="F") %>% 
+         filter(seedling_sp == "Q"), aes(x = mass, y = area, color = soil_type))+
+  geom_point()+labs(title= "Oak foliar")
+
+
+ok_b = ggplot(master %>% 
+         filter(compartment =="B") %>% 
+         filter(seedling_sp == "Q"), aes(x = mass, y = area, color = soil_type))+
+  geom_point()+labs(title= "Oak below-ground")
+
+
+(bc_a+bc_b+bc_f)/(ok_a+ok_b+ok_f)
+```
+
+```{r}
+ggplot(master %>% 
+         filter(!is.na(sapwood_area)) %>% 
+         filter(plant_compartment =="foliar"),
+       aes(x =area, y = sapwood_area, color= drought_treat))+
+  geom_point()+
+  facet_wrap(~seedling_sp)+geom_smooth(method = "lm")
+
+ggplot(master %>% 
+         filter(!is.na(sapwood_area)) %>% 
+         filter(plant_compartment =="foliar"),
+       aes(x =seedling_sp, y = area/sapwood_area, fill= drought_treat))+
+  geom_boxplot()
+
+
+testset = master %>% 
+         filter(!is.na(sapwood_area)) %>% 
+         filter(plant_compartment =="foliar") %>% 
+  filter(seedling_sp == "P")
+
+t.test((area/sapwood_area)~ drought_treat, data = testset)
+```
+Combining the area and mass data from the subsamples parts of the seedlings
+
+```{r}
+comp_a = master %>% 
+  filter(compartment =="A") #aboveground primary
+comp_b = master %>% 
+  filter(compartment =="B") #belowground primary
+comp_f = master %>% 
+  filter(compartment =="F") #foliar primary
+
+comp_p = master %>% 
+  filter(compartment =="P") %>% #aboveground predawn
+  rename(addmass = mass) %>% 
+  rename(addarea = area) %>% 
+  select(seedling_id, addmass, addarea)
+
+comp_m = master %>% 
+  filter(compartment =="M")%>% #aboveground midday
+  rename(addmass = mass) %>% 
+  rename(addarea = area)%>% 
+  select(seedling_id, addmass, addarea)
+
+comp_g = master %>% 
+  filter(compartment =="G")%>% #foliar predawn
+  rename(addmass = mass) %>% 
+  rename(addarea = area)%>% 
+  select(seedling_id, addmass, addarea)
+
+comp_h = master %>% 
+  filter(compartment =="H")%>% #foliar midday
+  rename(addmass = mass) %>% 
+  rename(addarea = area)%>% 
+  select(seedling_id, addmass, addarea)
+
+
+foliar_combine = comp_f %>% 
+  left_join(comp_g) %>% 
+  mutate(addmass = coalesce(addmass, 0),addarea = coalesce(addarea, 0)) %>% 
+  mutate(mass = mass+addmass, area = area+addarea) %>%  select(-addmass, -addarea)%>% 
+  left_join(comp_h) %>% 
+  mutate(addmass = coalesce(addmass, 0),addarea = coalesce(addarea, 0)) %>% 
+  mutate(mass = mass+addmass, area = area+addarea) %>%  select(-addmass, -addarea)
+
+above_combine = comp_a %>% 
+  left_join(comp_p) %>% 
+  mutate(addmass = coalesce(addmass, 0),addarea = coalesce(addarea, 0)) %>% 
+  mutate(mass = mass+addmass, area = area+addarea) %>%  select(-addmass, -addarea)%>% 
+  left_join(comp_m) %>% 
+  mutate(addmass = coalesce(addmass, 0),addarea = coalesce(addarea, 0)) %>% 
+  mutate(mass = mass+addmass, area = area+addarea) %>%  select(-addmass, -addarea)
+
+
+master_combine = bind_rows(comp_b, foliar_combine, above_combine)
+
+write_csv(master_combine, here("data", "analysis/harvest_metrics.csv"))
+
+```
+
+
+```{r}
+ggplot(master_combine)+
+  geom_boxplot(aes(x = seedling_sp, y = area, fill = soil_type))+
+  facet_wrap(~compartment, scales = "free")
+
+ggplot(master_combine)+
+  geom_boxplot(aes(x = seedling_sp, y = mass, fill = soil_type))+
+  facet_wrap(~compartment, scales = "free")
+
+TukeyHSD(aov(lm(area~soil_type, data= master_combine %>% 
+        filter(seedling_sp=="P") %>% 
+        filter(compartment == "F"))))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+

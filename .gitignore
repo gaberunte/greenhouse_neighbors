@@ -29,3 +29,6 @@ photos*
 *.RData*
 *.fast*
 *.JPG
+#sanger files
+*.ab1
+*.seq 

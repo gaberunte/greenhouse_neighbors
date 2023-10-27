@@ -1,0 +1,73 @@
+---
+title: "End analysis"
+format: html
+---
+
+```{r setup, echo = FALSE}
+library(here)
+library(janitor)
+library(RColorBrewer)
+library(tidyverse)
+
+gg_soilcolor = scale_color_manual(name = "Soil condition", breaks = c("P", "Q", "C"), labels = c("Bigcone", "Oak", "Control"),
+                                  values = c("#2A0944", "#3FA796", "#FEC260"))
+```
+
+In this document, I will attempt to explain the hypotheses and analyses related to the full duration of the greenhouse project I have dryly named GHEcto. Perhaps a new name will come in the process. 
+
+I begin by reading in the relevant data.
+```{r, message = F}
+measure = read_csv(here("data", "analysis/size_master.csv"))
+harvest = read_csv(here("data", "analysis/harvest_metrics.csv")) 
+health = read_csv(here("data", "analysis/ndvi_data.csv"))
+roottips = read_csv(here("data", "analysis/harvest_roottips - all.csv"))
+```
+
+
+Let's get a quick look at the timeseries in the dataset. We will facet by seedling species and color the data by the soil type.
+```{r, warning=F}
+ggplot(measure, aes(x = date, y = height_cm, color = soil_type, group= seedling_id))+
+  geom_point()+
+  geom_line(alpha = 0.15)+
+  facet_wrap(~seedling_sp, scales = "free")+gg_soilcolor+theme_minimal()
+
+ggplot(measure, aes(x = date, y = height_cm*diameter_mm, color = soil_type, group= seedling_id))+
+  geom_point()+
+  geom_line(alpha = 0.15)+
+  facet_wrap(~seedling_sp, scales = "free")+gg_soilcolor+theme_minimal()
+```
+
+A primary hypothesis in this work was that having more than one host in the same pot would increase the diversity of fungi in the system. 
+```{r}
+tips_long = roottips %>% 
+  pivot_longer(cols = A:H,names_to = "well", values_to = "morphotype") %>% 
+  select(-well, -puller, -plate, -column)
+
+seedlings = measure %>% 
+  select(seedling_id, seedling_sp, soil_type, neighb_sp, neighb_st) %>% 
+  filter(!is.na(neighb_sp)) %>% 
+  distinct()
+
+diversity_df = tips_long %>%
+  mutate(seedling_id = as.numeric(seedling_id)) %>% 
+  left_join(seedlings) %>%
+  mutate(pct_col = colonized/(colonized+uncolonized)) %>% 
+  mutate(tree_div = case_when(
+    seedling_sp == neighb_sp ~1,
+    .default = 2
+  )) %>% 
+  group_by(seedling_id, seedling_sp, tree_div) %>% 
+  summarise( fung_div = length(unique(morphotype)))
+
+ggplot(diversity_df, aes(x = as.factor(tree_div), y = fung_div, fill = seedling_sp))+
+  geom_boxplot()
+```
+
+Next thing to do will be to do the same analysis but to do it based on the diversity of the incoming communities and the survival of the trees in the pot. `   
+
+
+
+
+
+
+

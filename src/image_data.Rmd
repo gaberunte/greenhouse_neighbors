@@ -1,0 +1,120 @@
+---
+title: "harvest_plantsize"
+author: "Gabe Runte"
+date: "2023-05-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(here)
+library(janitor)
+library(tidyverse)
+```
+
+
+
+```{r, eval = F}
+# Run chunk as a whole! 
+
+image_data = list.files(here("data", "image_processing"))
+setwd(here("data", "image_processing"))
+
+image_df <- image_data %>%
+  map(read_csv) %>%    # read in all the files individually, using
+                       # the function read_csv() from the readr package
+  reduce(rbind)        # reduce with rbind into one dataframe
+image_df
+
+write_csv(image_df, here("data", "harvest_imagedata.csv"))
+```
+
+```{r}
+img = read_csv(here("data", "harvest_imagedata.csv")) %>% 
+  mutate(plant_compartment = case_when(
+    plant_compartment == "A" ~ "aboveground",
+    plant_compartment == "B" ~ "belowground",
+    plant_compartment == "FALSE" ~ "foliar",
+    plant_compartment == "P" ~ "predawn_stem",
+    plant_compartment == "G" ~ "predawn_foliar",
+    plant_compartment == "M" ~ "midday_stem",
+    plant_compartment == "H" ~ "midday_foliar",
+    )) %>% 
+  select(!blk_pixels) %>% 
+  select(!files)
+
+hold = img %>% 
+  group_by(seedling_id, plant_compartment) %>% 
+  summarize(n = n())
+
+img_wide = img %>% 
+  mutate(area = as.numeric(area)) %>% 
+  pivot_wider(names_from = plant_compartment, values_from = area,values_fill = list(Value = 0)) %>% 
+  mutate_at(c("predawn_foliar","predawn_stem", "midday_foliar", "midday_stem", "foliar", "aboveground", "belowground"), ~replace_na(.,0))%>% 
+  mutate(aboveground = as.numeric(aboveground))%>% 
+  mutate(belowground = as.numeric(belowground))%>% 
+  mutate(foliar = as.numeric(foliar))%>% 
+  mutate(predawn_foliar = as.numeric(predawn_foliar))%>% 
+  mutate(midday_stem = as.numeric(midday_stem))%>% 
+  mutate(midday_foliar = as.numeric(midday_foliar)) %>% 
+  mutate(all_above = aboveground + foliar+predawn_stem+midday_stem+predawn_foliar+midday_foliar) %>% 
+  mutate(ab_ratio = all_above/belowground) %>% 
+  filter(!seedling_id == "3705") %>% 
+  mutate(total_size = all_above+belowground)
+
+#write_csv(img_wide, here("data", "wide_final_seedling_area.csv")) 
+    
+ggplot(img_wide, aes(x = soil_type, y = ab_ratio, fill = soil_type))+
+  geom_boxplot()+
+  facet_grid(cols = vars(seedling_sp))+
+  lims(y = c(0,1))
+
+ggplot(img_wide, aes(x = soil_type, y = ab_ratio, fill = soil_type))+
+  geom_boxplot()+
+  facet_grid(cols = vars(seedling_sp))+
+  lims(y = c(0,1))
+ggplot(img_wide, aes(x = soil_type, y = all_above+belowground, fill = soil_type))+
+  geom_boxplot()+
+  facet_grid(cols = vars(seedling_sp))
+
+TukeyHSD(aov(lm(ab_ratio~soil_type, data = img_wide %>% 
+                  filter(seedling_sp == "P"))))
+
+TukeyHSD(aov(lm(ab_ratio~soil_type, data = img_wide %>% 
+                  filter(seedling_sp == "Q"))))
+```
+
+```{r}
+repotting = read_csv(here("data", "seedling_photo_data.csv")) %>% 
+  select(-seedling_sp, -notes) %>% 
+  rename(above = above_area_cm2, below = underground_area_cm2) %>% 
+  mutate(repotting_area = above+below)
+
+
+area_compare = img_wide %>% 
+  select(seedling_id, seedling_sp, soil_type, total_size) %>% 
+  rename(harvest_area = total_size) %>% 
+  left_join(repotting %>% 
+              select(seedling_id, repotting_area)) %>% 
+  mutate(growth = harvest_area - repotting_area/100) %>% 
+  filter(!is.na(growth))
+
+
+ggplot(area_compare, aes(x = soil_type, y = growth, fill = soil_type))+
+  geom_boxplot()+
+  facet_wrap(~seedling_sp)
+
+ggplot(area_compare, aes(x = soil_type, y = repotting_area, fill = soil_type))+
+  geom_boxplot()+
+  facet_wrap(~seedling_sp)
+
+ggplot(area_compare, aes(x = soil_type, y = harvest_area, fill = soil_type))+
+  geom_boxplot()+
+  facet_wrap(~seedling_sp)
+```
+
+
+
+
+

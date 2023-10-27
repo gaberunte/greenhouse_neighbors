@@ -1,0 +1,73 @@
+---
+title: "biomass_analysis"
+author: "Gabe Runte"
+date: "2023-10-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(here)
+library(janitor)
+library(lubridate)
+library(tidyverse)
+
+```
+
+```{r}
+biomass = read_csv(here("data/biomass - foliar (1).csv")) %>% 
+  clean_names() %>% 
+  select(1:3)  %>% 
+  mutate(compartment = toupper(compartment))
+reweigh_df = read_csv(here("data/ghecto_reweigh - Sheet1.csv"))%>% 
+  clean_names()%>% 
+  rename(reweigh = mass)
+
+seedlings = read_csv(here("data/analysis/size_master.csv")) %>% 
+  select(seedling_id, seedling_sp) %>% 
+  distinct() 
+
+compare = reweigh_df %>% 
+  left_join(biomass) %>% 
+  rename(seedling_id = plant_id) %>% 
+  left_join(seedlings) %>% 
+  filter(!is.na(reweigh)) %>% 
+  mutate(comp = case_when(
+    compartment =="A" ~ "Stems",
+    compartment =="B" ~ "Roots",
+    compartment =="F" ~ "Leaves",
+  ))
+
+biomass %>% 
+  filter(compartment =="F") %>% 
+  select(plant_id, compartment) %>% distinct()
+biomass %>% 
+  filter(compartment =="A")%>% 
+  select(plant_id, compartment) %>% distinct()
+biomass %>% 
+  filter(compartment =="B")%>% 
+  select(plant_id, compartment) %>% distinct()
+```
+
+```{r}
+ggplot(compare %>% 
+         filter(compartment %in% c("A", "B")), aes(x = mass, y = reweigh, color = seedling_sp))+
+  geom_point()+
+  facet_grid(cols = vars(seedling_sp), rows = vars(comp), scales="free")+
+  geom_smooth(method = "lm")+
+  stat_cor(aes(label = after_stat(rr.label)), color = "red", geom = "label")+
+  labs(x = "Mass with moisture", y = "Reweighed dry mass")
+
+#ggsave("figures/drymass_confirm.png", width = 7, height = 5)
+
+summary(lm(mass~reweigh +seedling_sp*compartment, data = compare))
+```
+
+
+
+
+
+
+
+
