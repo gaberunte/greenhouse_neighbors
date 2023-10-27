@@ -26,6 +26,6 @@ photos*
 .Rproj.user
 *scan*
 *DS_Store*
-*.RData
+*.RData*
 *.fast*
 *.JPG
