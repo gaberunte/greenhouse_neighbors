@@ -2,7 +2,7 @@
 #### A study of neighbor effects in an oak/doug-fir shared-pot greenhouse experiment
 
 <br>
-![](/project_photos/shared_pot.jpg)
+![](/project_photos/shared_pot.jpeg)
 
 <br>
 
