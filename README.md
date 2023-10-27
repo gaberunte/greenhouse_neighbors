@@ -3,7 +3,9 @@
 
 <br>
 
-<img src="/project_photos/shared_pot.png"  width=50% height=50%>
+<p align="center">
+  <img src="/project_photos/shared_pot.png"  width=50% height=50%>
+</p>
 
 <br>
 
