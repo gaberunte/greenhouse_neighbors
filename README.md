@@ -3,7 +3,7 @@
 
 <br>
 
-![](/project_photos/shared_pot.png)
+<img src="/project_photos/shared_pot.png"  width=50% height=50%>
 
 <br>
 
