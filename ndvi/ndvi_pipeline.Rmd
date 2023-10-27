@@ -1,0 +1,227 @@
+---
+title: "NDVI generator"
+author: Aubrey Chuen
+output: html_notebook
+---
+
+```{r}
+# Thu Jul 28 15:28:16 2022 ------------------------------
+
+# Load packages
+library(jpeg)
+library(tidyverse)
+library(here)
+library(janitor)
+library(raster)
+library(sf)
+```
+
+
+```{r}
+photos = list.files(here("calibrated_photos"))
+path = file.path(here("calibred_photos"))
+
+mapping = read_csv(here("data", "MAPIR Photos to ID - total.csv")) %>% 
+  clean_names()
+
+total = tibble(photos) %>% 
+  mutate(photo_id = str_sub(photos, 1, -16)) %>% 
+  left_join(mapping) %>% 
+  mutate(mean_ndvi = NaN) %>% 
+  mutate(median_ndvi = NaN) %>% 
+  mutate(sd_ndvi = NaN) 
+
+ndvi_list = rep(NaN, length(total$photos))
+```
+
+
+```{r}
+for(i in 1:length(total$photos)){
+
+ap = stack(here("calibrated_photos", total$photos[i]))
+bp = brick(ap)
+
+NIR = bp[[3]]
+RED = bp[[1]]
+NIR_max = NIR@data@max *0.7
+NDVI<-(NIR-RED)/(NIR+RED)
+NDVI[NIR<NIR_max]<- NaN
+NDVI[2800:3000,]<-NaN
+
+#total$ndvi[i]= NDVI
+
+total$mean_ndvi[i]= mean(NDVI@data@values, na.rm = T)
+total$median_ndvi[i]= median(NDVI@data@values, na.rm = T)
+total$sd_ndvi[i]= sd(NDVI@data@values, na.rm = T)
+}
+
+```
+
+
+```{r}
+drought = read_csv(here("data", "drought_treatments.csv")) 
+pairs = read_csv(here("data", "ghecto_neighbor_pairs.csv")) %>% 
+  pivot_longer(cols = 2:3, values_to = "seedling_id") %>% 
+  dplyr::select(!name)
+seeds = read_csv(here("data", "seedling_measurements.csv")) %>% 
+  left_join(pairs)%>% 
+  left_join(drought)  %>% 
+  clean_names() %>% 
+  dplyr::select(seedling_id, seedling_sp, soil_type, treatment)
+  
+
+meta = total %>% 
+  left_join(seeds)
+
+```
+
+```{r}
+ap = stack(here("calibrated_photos", total$photos[2]))
+bp = brick(ap)
+
+NIR = bp[[3]]
+GREEN = bp[[2]]
+RED = bp[[1]]
+NIR_max = NIR@data@max *0.7
+NDVI<-(NIR-RED)/(NIR+RED)
+NDVI[NIR<190]<- NaN
+NDVI[2800:3000,]<-NaN
+
+hist(as.vector(NIR@data@values))
+
+ndvi_df <-as.data.frame(NDVI, xy = TRUE)
+dim(NDVI)
+range(ndvi_df$x)
+
+ggplot(data = ndvi_df) +
+    geom_raster(aes(x = x, y = y, fill = layer)) +
+    scale_fill_continuous(high = "chartreuse3", low = "coral2", na.value = "transparent", limits = c(0, 0.125)) +
+    theme_void() +
+    theme(legend.position = "none")
+
+NIR = bp[[3]]
+RED = bp[[1]]
+NIR_max = NIR@data@max *0.7
+NDVI<-(NIR-RED)/(NIR+RED)
+NDVI[NIR<NIR_max]<- NaN
+NDVI[2800:3000,]<-NaN
+
+hist(as.vector(NIR@data@values))
+
+ndvi_df <-as.data.frame(NDVI, xy = TRUE)
+dim(NDVI)
+range(ndvi_df$x)
+
+ggplot(data = ndvi_df) +
+    geom_raster(aes(x = x, y = y, fill = layer)) +
+    scale_fill_continuous(high = "chartreuse3", low = "coral2", na.value = "transparent", limits = c(0, 0.125)) +
+    theme_void() +
+    theme(legend.position = "none")
+
+
+#ggsave(here("figures", "plant_healthy.png"), dpi = 500, width = 7, height = 5)
+
+
+# 5 = healthy 10 = dead
+
+plot(RED)
+plot(GREEN)
+plot(NIR)
+
+ap = stack(here("calibrated_photos", total$photos[3]))
+bp = brick(ap)
+
+NIR = bp[[3]]
+GREEN = bp[[2]]
+RED = bp[[1]]
+
+plot(RED)
+plot(GREEN)
+plot(NIR)
+
+img <- magick::image_read(here("calibrated_photos", total$photos[8]))
+  # Changing the levels in the image to increase contrast
+img_mod = img %>% magick::image_modulate( brightness = 75, saturation = 200, hue = 150)
+plot(img)
+img_25 = img %>% magick::image_modulate( brightness = 75, saturation = 200, hue = 25)
+img_50 = img %>% magick::image_modulate( brightness = 75, saturation = 200, hue = 50)
+img_75 = img %>% magick::image_modulate( brightness = 75, saturation = 200, hue = 75)
+img_125 = img %>% magick::image_modulate( brightness = 75, saturation = 200, hue = 125)
+img_150 = img %>% magick::image_modulate( brightness = 75, saturation = 200, hue = 150)
+img_175 = img %>% magick::image_modulate( brightness = 75, saturation = 200, hue = 175)
+
+plot(img_25)
+plot(img_50)
+plot(img_75)
+plot(img_125)
+plot(img_150)
+plot(img_175)
+
+img <- magick::image_read(here("calibrated_photos", total$photos[2]))
+  # Changing the levels in the image to increase contrast
+img_mod = img %>% magick::image_modulate( brightness = 75, saturation = 200, hue = 150)
+plot(img)
+img_25 = img %>% magick::image_modulate( brightness = 75, saturation = 200, hue = 25)
+img_50 = img %>% magick::image_modulate( brightness = 75, saturation = 200, hue = 50)
+img_75 = img %>% magick::image_modulate( brightness = 75, saturation = 200, hue = 75)
+img_125 = img %>% magick::image_modulate( brightness = 75, saturation = 200, hue = 125)
+img_150 = img %>% magick::image_modulate( brightness = 75, saturation = 200, hue = 150)
+img_175 = img %>% magick::image_modulate( brightness = 75, saturation = 200, hue = 175)
+
+plot(img_25)
+plot(img_50)
+plot(img_75)
+plot(img_125)
+plot(img_150)
+plot(img_175)
+
+img <- magick::image_read(here("calibrated_photos", total$photos[3]))
+  # Changing the levels in the image to increase contrast
+img_mod = img %>% magick::image_modulate( brightness = 75, saturation = 200, hue = 150)
+plot(img)
+img_25 = img %>% magick::image_modulate( brightness = 75, saturation = 200, hue = 25)
+img_50 = img %>% magick::image_modulate( brightness = 75, saturation = 200, hue = 50)
+img_75 = img %>% magick::image_modulate( brightness = 75, saturation = 200, hue = 75)
+img_125 = img %>% magick::image_modulate( brightness = 75, saturation = 200, hue = 125)
+img_150 = img %>% magick::image_modulate( brightness = 75, saturation = 200, hue = 150)
+img_175 = img %>% magick::image_modulate( brightness = 75, saturation = 200, hue = 175)
+
+plot(img_25)
+plot(img_50)
+plot(img_75)
+plot(img_125)
+plot(img_150)
+plot(img_175)
+
+imagex = jpeg::readJPEG(here("calibrated_photos", total$photos[3]))
+
+imagey = raster(imagex[,,3])
+plot(imagey)
+```
+
+```{r}
+
+ap = stack(here("testtwop", "CopyOf2023_0124_120710_012_CALIBRATED.JPG"))
+bp = brick(ap)
+
+NIR = bp[[3]]
+RED = bp[[1]]
+NIR_max = NIR@data@max *0.7
+NDVI<-(NIR-RED)/(NIR+RED)
+NDVI[NIR<NIR_max]<- NaN
+
+
+plot(NDVI)
+dim(NDVI)
+
+
+NDVI2 = NDVI
+plot(NDVI2)
+NDVI2[2800:3000,]<-NaN
+plot(NDVI2)
+
+mean(NDVI2@data@values, na.rm = T)
+```
+
+
+

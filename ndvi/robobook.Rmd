@@ -1,0 +1,90 @@
+---
+title: "NDVI for GHECTO"
+author: "Aubrey Chuen"
+date: "2022-10-19"
+output: rmdformats::robobook
+---
+
+```{r robobook packages, include=FALSE}
+library(rmdformats)
+library(shiny)
+```
+
+Loading packages, not shown here
+
+```{r packages for NDVI_generator, include=FALSE}
+# Load packages
+library(jpeg)
+library(tidyverse)
+library(here)
+library(janitor)
+library(raster)
+library(dplyr)
+library(readxl)
+library(openxlsx)
+library(ggplot2)
+```
+
+
+This is the actual code, might want to break it apart into multiple chunks and describe each part/purpose
+
+```{r}
+# Create a list of the photo files
+files <- list.files(here("calibrated_photos", "TIFs", "07_photos"))
+
+# Make a function
+func <- function(filename){
+# Import MAPIR image data in Calibrated TIF format
+multispectral_st <- stack(here("calibrated_photos", "TIFs", "07_photos", filename))
+
+# Convert data into rasterbrick for faster processing
+multispectral_br <- brick(multispectral_st)
+
+
+# Calculate NDVI using the RED (band 1) and NIR (band 3) bands
+ndvi <- (multispectral_br[[3]] - multispectral_br[[1]]) / (multispectral_br[[3]] + multispectral_br[[1]])
+
+# Set boundaries for values analyzed
+holding = ndvi@data@values
+holding1 = rep(NaN, length(holding))
+
+for(i in 1:length(holding)){
+  
+  ifelse(holding[i]<0.05, holding1[i] <- 0, holding1[i] <- holding[i] )
+}
+ndvi@data@values = holding1            
+
+# Calculate mean
+m <- mean(subset(holding1,holding1 > 0))
+
+return(m)
+}
+
+# Generate mean values for each photo
+means = c()
+
+for (file in unlist(files)) {
+  means <- append(means, func(file))
+}
+```
+
+do i need this?
+```{r}
+# Put values in tibble
+photos_test_fullres = tibble(photos=files) %>%
+  mutate(m = means)
+```
+
+Next steps that don't need to be in code, can just describe as text if choose to include
+
+```{r}
+# Copied code into RStudio Server using Moeller Lab Linux
+# See in drive "Using the Linux Server" on how to link PC remotely to server via Windows Terminal
+# Ran all images and generated table of mean NDVI values for each image
+# Save server environment data to server files
+# Exported environment data to PC via Windows Terminal ("photos_table")
+# Upload server environment data through PC files in R
+# Imported from drive "MAPIR_Photos_to_ID"
+```
+
+

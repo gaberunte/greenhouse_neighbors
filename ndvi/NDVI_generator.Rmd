@@ -1,0 +1,415 @@
+---
+title: "NDVI generator"
+author: Aubrey Chuen
+output: html_notebook
+---
+
+```{r}
+# Thu Jul 28 15:28:16 2022 ------------------------------
+
+# Load packages
+library(jpeg)
+library(tidyverse)
+library(here)
+library(janitor)
+library(raster)
+library(dplyr)
+library(readxl)
+library(openxlsx)
+library(ggplot2)
+library(sf)
+```
+
+```{r QUERCUS}
+
+# Create a list of the photo files
+files <- list.files(here("mapir_photos", "photos_2023_01", "total_calibrated", "testtwoq"))
+
+# Make a function
+func <- function(filename){
+# Import MAPIR image data in Calibrated TIF format
+multispectral_st <- stack(here("mapir_photos", "photos_2023_01", "total_calibrated", "testtwoq", filename))
+
+# Convert data into rasterbrick for faster processing
+multispectral_br <- brick(multispectral_st)
+
+
+# Calculate NDVI using the RED (band 1) and NIR (band 3) bands
+ndvi <- (multispectral_br[[3]] - multispectral_br[[1]]) / (multispectral_br[[3]] + multispectral_br[[1]])
+
+
+# Set boundaries for values analyzed
+holding = ndvi@data@values
+holding1 = rep(NaN, length(holding))
+
+for(i in 1:length(holding)){
+  
+  ifelse(holding[i]<0.05, holding1[i] <- 0, holding1[i] <- holding[i] )
+}
+ndvi@data@values = holding1            
+
+
+# Plot data
+plot(ndvi,
+     main = "NDVI attempt",
+     axes = FALSE, box = FALSE)
+
+# Calculate mean
+m <- mean(subset(holding1,holding1 > 0))
+
+return(m)
+}
+
+# Generate mean values for each photo
+means = c()
+
+for (file in unlist(files)) {
+  means <- append(means, func(file))
+}
+
+# Put values in tibble
+quercus_test = tibble(photos=files) %>%
+  mutate(m = means)
+
+```
+
+```{r QUERCUS}
+
+aq = stack(here("mapir_photos", "photos_2023_01", "total_calibrated", "testtwoq", files[1]))
+bq = brick(aq)
+
+# plot(bq[[1]])
+# plot(bq[[2]])
+# plot(bq[[3]])
+# 
+# plot(bq[[3]]-bq[[2]])
+
+holdq = bq[[3]]
+
+plot(holdq>180)
+plot(holdq>0.7*holdq@data@max)
+
+# plot(holdq>170)
+# plot(holdq>180)
+# plot(holdq>190)
+
+
+aq = stack(here("mapir_photos", "photos_2023_01", "total_calibrated", "testtwoq", files[2]))
+bq = brick(aq)
+
+holdq = bq[[3]]
+
+plot(holdq>180)
+plot(holdq>0.7*holdq@data@max)
+```
+
+```{r PSEUDOTSUGA}
+
+# Create a list of the photo files
+files <- list.files(here("mapir_photos", "photos_2023_01", "total_calibrated", "testtwop"))
+
+# Make a function
+func <- function(filename){
+# Import MAPIR image data in Calibrated TIF format
+multispectral_st <- stack(here("mapir_photos", "photos_2023_01", "total_calibrated", "testtwop", filename))
+
+# Convert data into rasterbrick for faster processing
+multispectral_br <- brick(multispectral_st)
+
+
+# Calculate NDVI using the RED (band 1) and NIR (band 3) bands
+ndvi <- (multispectral_br[[3]] - multispectral_br[[1]]) / (multispectral_br[[3]] + multispectral_br[[1]])
+
+
+# Set boundaries for values analyzed
+holding = ndvi@data@values
+holding1 = rep(NaN, length(holding))
+
+for(i in 1:length(holding)){
+  
+  ifelse(holding[i]<0.05, holding1[i] <- 0, holding1[i] <- holding[i] )
+}
+ndvi@data@values = holding1            
+
+
+# # Plot data
+# plot(ndvi,
+#      main = "NDVI attempt",
+#      axes = FALSE, box = FALSE)
+# 
+# # Calculate mean
+# m <- mean(subset(holding1,holding1 > 0))
+
+return(m)
+}
+
+# Generate mean values for each photo
+means = c()
+
+for (file in unlist(files)) {
+  means <- append(means, func(file))
+}
+
+# Put values in tibble
+pseudotsuga_test = tibble(photos=files) %>%
+  mutate(m = means)
+```
+
+```{r PSEUDOTSUGA}
+
+ap = stack(here("mapir_photos", "photos_2023_01", "total_calibrated", "testtwop", files[1]))
+bp = brick(ap)
+
+# plot(b[[1]])
+# plot(b[[2]])
+# plot(b[[3]])
+# 
+# plot(b[[3]]-b[[2]])
+
+holdp = bp[[3]]
+
+plot(holdp>180) # what unit is 180 in?
+plot(holdp>0.7*holdp@data@max) # only taking the NIR band pixels above 70% of the maximum value in the pixels
+
+# plot(holdp>170)
+# plot(holdp>180)
+# plot(holdp>190)
+
+
+ap = stack(here("mapir_photos", "photos_2023_01", "total_calibrated", "testtwop", files[2]))
+bp = brick(ap)
+
+holdp = bp[[3]]
+
+plot(holdp>180)
+plot(holdp>0.7*holdp@data@max)
+```
+
+```{r Pseudotsuga test new threshold 70 of max}
+
+# Create a list of the photo files
+files <- list.files(here("mapir_photos", "photos_2023_01", "total_calibrated", "testtwop"))
+
+# Make a function
+func <- function(filename){
+
+# cut off values less than 70% of max in NIR band
+# Set boundaries for values analyzed
+# b[1] = RED
+# b[2] = GREEN
+# b[3] = NIR
+
+stack_p = stack(here("mapir_photos", "photos_2023_01", "total_calibrated", "testtwop", filename))
+brick_p = brick(stack_p)
+
+NIR_p = brick_p[[3]] # because b3 is NIR band
+
+trim_p = NIR_p>0.7*NIR_p@data@max
+trim1_p = rep(NaN, length(trim_p))
+
+
+for(i in 1:length(trim_p)){
+  
+  ifelse(trim_p[i]<0.7*trim_p@data@max, trim_p[i] <- 0, trim1_p[i] <- trim_p[i] )
+}
+0.7*trim_p@data@max = trim1_p  
+
+
+
+# Calculate NDVI using the RED (band 1) and NIR (band 3) bands
+ndvi <- (multispectral_br[[3]] - multispectral_br[[1]]) / (multispectral_br[[3]] + multispectral_br[[1]])
+
+
+
+# # Plot data
+# plot(ndvi,
+#      main = "NDVI attempt",
+#      axes = FALSE, box = FALSE)
+
+# Calculate mean
+m <- mean(subset(holding1,holding1 > 0))
+
+return(m)
+}
+
+# Generate mean values for each photo
+means = c()
+
+for (file in unlist(files)) {
+  means <- append(means, func(file))
+}
+
+# Put values in tibble
+pseudotsuga_test = tibble(photos=files) %>%
+  mutate(m = means)
+```
+
+```{r}
+
+ap = stack(here("testtwop", "CopyOf2023_0124_120456_008_CALIBRATED.JPG"))
+bp = brick(ap)
+
+NIR = bp[[3]]
+RED = bp[[1]]
+NIR_max = NIR@data@max *0.7
+NDVI<-(NIR-RED)/(NIR+RED)
+NDVI[NIR<NIR_max]<- NaN
+
+
+plot(NDVI)
+dim(NDVI)
+
+
+NDVI2 = NDVI
+plot(NDVI2)
+NDVI2[2800:3000,]<-NaN
+plot(NDVI2)
+
+mean(NDVI2@data@values, na.rm = T)
+
+
+
+
+```
+
+```{r}
+NIR = matrix(bp[[3]], nrow = nrow(bp[[3]]), ncol = ncol(bp[[3]]))
+RED = matrix(bp[[1]], nrow = nrow(bp[[1]]), ncol = ncol(bp[[1]]))
+NIR_max = 175
+NDVI<-matrix((NIR-RED)/(NIR+RED), nrow = nrow(NIR), ncol = ncol(NIR))
+NDVI.2 = matrix(rep(NaN, length(NIR)), nrow = nrow(NIR), ncol = ncol(NIR))
+
+for(i in 1:length(NIR)){
+  ifelse(NIR[i]>NIR_max, NDVI.2[i]<-NDVI[i], NDVI.2[i]<-0)
+  
+}
+NIRbr = raster(NIR)
+plot(bp[[3]])
+
+
+hist(as.vector(NIR))
+```
+
+
+```{r}
+# PIPELINE TEST for total = 9 photos (full resolution 07_photos)
+
+# Create a list of the photo files
+files <- list.files(here("calibrated_photos", "TIFs", "07_photos"))
+
+# Make a function
+func <- function(filename){
+# Import MAPIR image data in Calibrated TIF format
+multispectral_st <- stack(here("calibrated_photos", "TIFs", "07_photos", filename))
+
+# Convert data into rasterbrick for faster processing
+multispectral_br <- brick(multispectral_st)
+
+
+# Calculate NDVI using the RED (band 1) and NIR (band 3) bands
+ndvi <- (multispectral_br[[3]] - multispectral_br[[1]]) / (multispectral_br[[3]] + multispectral_br[[1]])
+
+
+# Set boundaries for values analyzed
+holding = ndvi@data@values
+holding1 = rep(NaN, length(holding))
+
+for(i in 1:length(holding)){
+  
+  ifelse(holding[i]<0.05, holding1[i] <- 0, holding1[i] <- holding[i] )
+}
+ndvi@data@values = holding1            
+
+
+# Plot data
+# plot(ndvi,
+#      main = "NDVI attempt",
+#      axes = FALSE, box = FALSE)
+
+# Calculate mean
+m <- mean(subset(holding1,holding1 > 0))
+
+return(m)
+}
+
+# Generate mean values for each photo
+means = c()
+
+for (file in unlist(files)) {
+  means <- append(means, func(file))
+}
+
+# Put values in tibble
+photos_test_fullres = tibble(photos=files) %>%
+  mutate(m = means)
+```
+
+```{r}
+# Copied code into RStudio Server using Moeller Lab Linux
+# See in drive "Using the Linux Server" on how to link PC remotely to server via Windows Terminal
+# Ran all images and generated table of mean NDVI values for each image
+# Save server environment data to server files
+# Exported environment data to PC via Windows Terminal ("photos_table")
+# Upload server environment data through PC files in R
+# Imported from drive "MAPIR_Photos_to_ID"
+```
+
+```{r}
+# Making the photo_IDs match in the tables to merge
+MAPIR_Photos_to_ID$photo_ID <- sprintf('%s_CALIBRATED.tif', MAPIR_Photos_to_ID$photo_ID)
+```
+
+```{r}
+# Merge the data tables
+merged <- merge(x = MAPIR_Photos_to_ID, y = photos_table, by = "photo_ID", all = TRUE)
+
+# Makin' 'em purdy
+prettymerged <- merged[,c("date_time", "seedling_ID", "photo_ID", "m")]
+
+# Export data table
+write.csv(prettymerged, file="NDVI_means_01.csv")
+```
+
+```{r}
+# Adding in some data for context
+# Imported "ghecto_neighbor_pairs" and "drought_assignments_bypot" (skip treatment type)
+# Merge via pot ID
+merged <- merge(x = ghecto_neighbor_pairs, y = drought_assignments_bypot, by = "pot", all = TRUE)
+
+# Make seedlings 1 and 2 into a single column, then exclude names to preserve only values needed
+mergelong <- merged %>% 
+  pivot_longer(cols = seedling_1:seedling_2, values_to = "seedling_ID" ) %>% 
+  select(!name)
+
+# Make a big ass table
+bigmerge07 <- merge(x = mergelong, y = NDVI_means_07, by = "seedling_ID", all = TRUE) %>% 
+  select(!c(photo_ID, pot))
+
+bigmerge09 <- merge(x = mergelong, y = NDVI_means_09, by = "seedling_ID", all = TRUE) %>% 
+  select(!c(photo_ID, pot))
+```
+
+
+```{r}
+# Let's make sum fookin plots
+
+# Drought vs Non-Drought NDVI box
+# Select data from bigmerge07 for July data
+dvnon07 <- bigmerge07 %>% 
+  select(!c(seedling_ID, date_time)) %>% 
+  filter(!is.na(drought))
+
+ggplot(dvnon07, aes(x = drought, y = m, fill = drought))  +
+    geom_boxplot()
+
+# Select data from bigmerge09 for September data
+dvnon09 <- bigmerge09 %>% 
+  select(!c(seedling_ID, date_time)) %>% 
+  filter(!is.na(drought))
+
+ggplot(dvnon09, aes(x = drought, y = m, fill = drought))  +
+    geom_boxplot()
+  
+
+```
+

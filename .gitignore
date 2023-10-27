@@ -32,3 +32,6 @@ photos*
 #sanger files
 *.ab1
 *.seq 
+*.html
+#gel images
+*.scn

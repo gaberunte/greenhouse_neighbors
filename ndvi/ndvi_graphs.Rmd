@@ -1,0 +1,251 @@
+---
+title: "ndvi_graphs"
+author: "Aubrey Chuen"
+date: "2022-10-12"
+output: html_document
+---
+
+```{r}
+# Load packages
+library(jpeg)
+library(tidyverse)
+library(here)
+library(janitor)
+library(raster)
+library(dplyr)
+library(readxl)
+library(openxlsx)
+library(ggplot2)
+library(lubridate)
+```
+
+```{r}
+# Read in data
+
+df07 <- read_csv(here("data","NDVI_means_07.csv"))
+df09 <- read_csv(here("data","NDVI_means_09.csv"))
+df11 <- read_csv(here("data", "NDVI_means_11.csv"))
+df01 <- read_csv(here("data", "NDVI_means_01.csv"))
+
+drought_assignments_bypot <- read_csv(here("data", "drought_assignments_bypot.csv"))
+ghecto_neighbor_pairs <- read_csv(here("data", "ghecto_neighbor_pairs.csv"))
+seedling_measurements <- read_csv(here("data", "seedling_measurements.csv"))
+```
+
+# LITERALLY REDO ALL OF THIS SO GROSSNASTY
+
+```{r}
+# Altering data frames
+
+# Merging neighbor pairs and drought assignments
+neighbors_drought <- merge(x = ghecto_neighbor_pairs, y = drought_assignments_bypot, by = "pot", all = TRUE)
+
+# Make seedlings 1 and 2 into a single column, then exclude names to preserve columns needed
+seedlingID_drought <- neighbors_drought %>% 
+  pivot_longer(cols = seedling_1:seedling_2, values_to = "seedling_ID") %>% 
+  dplyr::select(!name)
+
+
+# July data frame
+data07 <- merge(x = seedlingID_drought, y = df07, by = "seedling_ID", all = TRUE) %>% 
+  dplyr::select(!c(photo_ID, pot, ...1)) %>% 
+  filter(!is.na(drought))
+
+# September data frame
+data09 <- merge(x = seedlingID_drought, y = df09, by = "seedling_ID", all = TRUE) %>% 
+  dplyr::select(!c(photo_ID, pot, ...1)) %>% 
+  filter(!is.na(drought))
+
+# November data frame
+data11 <- merge(x = seedlingID_drought, y = df11, by = "seedling_ID", all = TRUE) %>% 
+  dplyr::select(!c(photo_ID, pot, ...1)) %>% 
+  filter(!is.na(drought))
+
+# January data frame
+data01 <- merge(x = seedlingID_drought, y = df01, by = "seedling_ID", all = TRUE) %>% 
+  dplyr::select(!c(photo_ID, pot, ...1)) %>% 
+  filter(!is.na(drought))
+```
+
+
+```{r}
+# Making a plot
+
+# July box plot
+ggplot(data07, aes(x = drought, y = m, fill = drought )) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("green", "orange")) +
+  xlab("Drought Treatment") +
+  ylab("NDVI") +
+  ggtitle("Average NDVI in Pre-Drought Treatment") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+# September box plot
+ggplot(data09, aes(x = drought, y = m, fill = drought )) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("green", "orange")) +
+  xlab("Drought Treatment") +
+  ylab("NDVI") +
+  ggtitle("Average NDVI in Mid-Drought 1 Treatment") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+# November box plot
+ggplot(data11, aes(x = drought, y = m, fill = drought )) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("green", "orange")) +
+  xlab("Drought Treatment") +
+  ylab("NDVI") +
+  ggtitle("Average NDVI in Mid-Drought 2 Treatment") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+t.test(m~drought, data= data11)
+
+# January box plot
+ggplot(data01, aes(x = drought, y = m, fill = drought )) +
+  geom_boxplot() +
+  scale_fill_manual(values = c("green", "orange")) +
+  xlab("Drought Treatment") +
+  ylab("NDVI") +
+  ggtitle("Average NDVI in Mid-Drought 2 Treatment") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+summary(data07)
+
+```
+
+
+```{r}
+# Table with NDVI means collected in both July and September, df07, df09, df11, and df01 stacked, long by date
+longdate <- rbind(df07, df09, df11, df01) %>% 
+  dplyr::select(!c(...1, photo_ID))
+
+drought_longdate <- merge(x = seedlingID_drought, y = longdate, by = "seedling_ID", all = TRUE) %>% 
+  dplyr::select(!pot)
+
+# Changing the date_time column from a time stamp to a numeric month, this will make it easier to plot
+# Mutated the December data to "11" in this data table to see more clearly (since all the "November" data was taken at once)
+
+## All those mutations need to be reworked -- but just to see it better its like that
+longdate_plot <- drought_longdate %>% 
+  mutate(date_time = as.Date(date_time)) %>% 
+  mutate(date_time = lubridate::ymd(date_time)) %>% 
+  mutate(month = month(date_time)) %>% 
+  filter(!is.na(drought)) %>% 
+  mutate(month = case_when(
+    month == 12 ~ 11, 
+    TRUE~ month
+  ))%>% 
+    mutate(month = case_when(
+    month == 1 ~ 12, 
+    TRUE~ month
+  )) %>% 
+  mutate(month = case_when(
+    month == 2 ~ 12, 
+    TRUE~ month
+  )) %>% 
+  mutate(group = paste(drought, month, sep = "")) %>% 
+  filter(!is.na(drought)) %>% 
+  mutate()
+
+
+### YES KEEP
+lp = longdate_plot %>% 
+  group_by(month) %>% 
+  summarize(date_mean = mean(date_time))
+
+lp_long = longdate_plot %>% 
+  left_join(lp)
+  
+  
+
+plot07091101 <- ggplot(lp_long, aes(x = date_mean, y = m, fill = drought, group = month))  +
+  geom_boxplot() +
+  scale_fill_manual(values = c("green", "orange")) +
+  xlab("Month") +
+  ylab("NDVI") +
+  ggtitle("Drought treatment effects on NDVI") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+plot07091101
+
+t.test(m~drought, data = longdate_plot[longdate_plot$month==12,])
+
+# Unsure how to change legend title to "Drought Treatment"
+
+```
+
+
+```{r}
+
+#### I HAVE NOT ENTERED THE data01 STUFF YET ###
+### I MIGHT NOT NEED TO IF EEMB 146 PROJ IS BETTER ###
+
+# Using case_when to create new column describing the treatments during the month 
+modmonth <- longdate_plot  %>% 
+  mutate(pre_mid = case_when(
+    month == 7 ~ "Before Drought",
+    month == 9 ~ "Mid-drought 1",
+    month == 11 ~ "Mid-drought 2"
+  ) )
+
+# Testing visuals of a scatterplot
+ggplot(modmonth, aes(x = pre_mid,
+                     y = m,
+                     colour = drought,
+                     group = seedling_ID)) +
+  geom_jitter() +
+  scale_colour_manual(values = c("green", "orange")) +
+  xlab("Time") +
+  ylab("NDVI") +
+  ggtitle("NDVI over time in drought conditions") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold")) 
+
+```
+
+
+```{r}
+# Altering Gabe's graphs
+
+# Altering data frames to include species and treatment by seedling_ID
+# Selecting and renaming needed portions of the measurements data table and merging to the larger table
+seedsp_redundant <- seedling_measurements %>% 
+  dplyr::select(c(seedling_id, `seedling sp.`, `soil type`)) %>% 
+  rename(
+    'seedling_ID' = 'seedling_id',
+    'seedling_sp' = 'seedling sp.',
+    'soil_type' = 'soil type'
+  )
+
+# Using duplicate function to eliminate redundant data
+seedling_sp <- seedsp_redundant [!duplicated(seedsp_redundant), ]
+
+# Merging data frames and conditionally removing rows if N/A for ______?
+specdf <- merge(x = modmonth, y = seedling_sp, by = 'seedling_ID', all = TRUE) %>%
+  filter(!is.na(pair))
+
+
+# Gabe's graphs recreated
+ggplot(specdf, aes(as.factor(month), m, fill = drought)) +
+  geom_boxplot() +
+  facet_grid(cols = vars(seedling_sp), rows = vars(soil_type)) +
+  scale_fill_manual(values = c('darkgoldenrod2', 'cornflowerblue'), breaks = c('Yes', 'No')) +
+  xlab("Month") +
+  ylab("Mean NDVI") +
+  ggtitle("NDVI over time by species and soil treatment") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+  
+
+ggplot(specdf, aes(as.factor(month), m, color = drought, group = seedling_ID))+
+  geom_jitter(width= 0.15) +
+  geom_line(alpha = 0.15)+
+  scale_colour_manual(values = c('darkgoldenrod2', 'cornflowerblue'), breaks = c('Yes', 'No'))+
+  theme_bw() +
+  facet_wrap(~seedling_sp) +
+  xlab("Month") +
+  ylab("Mean NDVI") +
+  ggtitle("Change in NDVI faceted by species") +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+```
+
+
+
