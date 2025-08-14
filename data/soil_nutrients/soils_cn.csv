@@ -1,0 +1,12 @@
+﻿Sample Location,Sample Description #1,Lab Number,Carbon   (%),Nitrogen (%),C/N Ratio
+recent_field,P1,768,1.89,0.16,11.81
+recent_field,P2,769,1.62,0.19,8.53
+recent_field,P3,770,1.83,0.19,9.63
+recent_field,Q1,771,1.30,0.18,7.22
+recent_field,Q2,772,1.61,0.22,7.32
+recent_field,Q3,773,1.71,0.18,9.5
+recent_gh,S1,774,3.23,0.2,16.15
+recent_gh,S2,775,1.75,0.15,11.67
+recent_gh,S3,776,4.01,0.23,17.43
+old_field,B1,777,1.61,0.18,8.94
+old_field,O1,778,2.60,0.27,9.63

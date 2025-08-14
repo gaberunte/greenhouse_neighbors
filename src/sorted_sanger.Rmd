@@ -20,11 +20,11 @@ library(dada2)
 
 ```{r}
 
-tips.dec21 = read_csv(here("data", "desttips_inventoried.csv")) %>% 
+tips.dec21 = read_csv(here("data", "destructive_tips/desttips_inventoried.csv")) %>% 
   mutate(set = "Dec21")
-tips.jan22 = read_csv(here("data", "desttips_inventoried_jan21.csv")) %>% 
+tips.jan22 = read_csv(here("data", "destructive_tips/desttips_inventoried_jan21.csv")) %>% 
   mutate(set = "Jan22") 
-tips.feb22 = read_csv(here("data", "desttips_inventoried_feb22.csv")) %>% 
+tips.feb22 = read_csv(here("data", "destructive_tips/desttips_inventoried_feb22.csv")) %>% 
   mutate(set = "Feb22") 
 
 tips.all = tips.feb22 %>%
@@ -37,7 +37,7 @@ tips.all = tips.feb22 %>%
 tips = tips.all %>% 
   filter(blast_seq != "NaN", percent_hq>1) 
 
-seedlings = read_csv(here("data", "seedling_measurements.csv")) %>% 
+seedlings = read_csv(here("data", "seedling_measurements", "seedling_measurements.csv")) %>% 
   clean_names() %>% 
   dplyr::select(seedling_id, soil_type, seedling_sp) 
 
@@ -46,7 +46,7 @@ seedlings.unique = seedlings[match( unique(seedlings$seedling_id), seedlings$see
 ```
 
 ```{r, eval = FALSE}
-unite.ref <- here("unite_db", "sh_general_release_s_10.05.2021/sh_general_release_dynamic_s_10.05.2021.fasta")
+unite.ref <- "/Users/Gabe/Desktop/phd/unite/sh_general_release_dynamic_25.07.2023.fasta"
 
 tiptaxa = assignTaxonomy(tips$blast_seq, unite.ref, multithread = TRUE, tryRC = TRUE)
 
@@ -102,11 +102,11 @@ ggplot(ectos, aes(x=as.factor(seedling_id), fill = taxon_2)) +
 
 ```{r}
 #destructive seedlings
-harvested = read_csv(here("data", "ghecto_repotting_dry_biomass.csv")) %>% 
+harvested = read_csv(here("data", "repotting", "ghecto_repotting_dry_biomass.csv")) %>% 
   left_join(seedlings.unique) 
 
 #all root tips pulled
-pulled_tips = read_csv(here("data", "ghecto_repotting_root_pulling_data.csv")) %>% 
+pulled_tips = read_csv(here("data", "repotting", "ghecto_repotting_root_pulling_data.csv")) %>% 
   mutate(pct_colonization = colonization_numerator/ colonization_denominator)
 tips_longer = pulled_tips %>% 
   pivot_longer(cols=6:13, names_to = "row", values_to = "morphotype") %>% 
@@ -122,7 +122,7 @@ tips_longer = pulled_tips %>%
   mutate(plate_short = as.numeric(substr(plate, 5,6)))
 
 #getting treatment info on every seedling
-seedlings = read_csv(here("data", "seedling_measurements.csv"))
+seedlings = read_csv(here("data", "seedling_measurements", "seedling_measurements.csv"))
 seedling.treatments = seedlings %>% 
   select(1:3) %>% 
   clean_names() 
@@ -155,7 +155,7 @@ low.q = master %>%
   filter(percent_hq <2)
 
 no.genus = master %>% 
-  filter(percent_hq >=2)
+  filter(percent_hq >=2) %>% 
   filter(is.na(genus))
 
 

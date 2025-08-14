@@ -49,26 +49,11 @@ size = bind_rows(mar2021, apr2021, dec2021, feb2022, apr2022, jul2022, mar2023)%
     notes %in% c("Brown", "brown", "b") ~ 0,
     TRUE ~ 1))
 
-sd_treat = read_csv(here("data", "seedling_measurements.csv")) %>% 
-  clean_names() %>%  dplyr::select(seedling_id, seedling_sp, soil_type) 
+sd_treat = read_csv(here("data", "design", "total_treatment.csv")) %>% 
+  clean_names() 
 
-sd_treat = sd_treat[match(unique(sd_treat$seedling_id), sd_treat$seedling_id),]
-
-pairs = read_csv(here("data", "ghecto_neighbor_pairs.csv"))
-
-neighbors = tibble(seedling_id = c(pairs$seedling_1, pairs$seedling_2)) %>% 
-  mutate(neighbor = c(pairs$seedling_2, pairs$seedling_1)) %>% 
-  mutate(pot = rep(pairs$pot, 2))
-
-size_treat = size %>% 
-  left_join(sd_treat)
-size_n = size_treat %>% 
-  filter(date > my("apr2021")) %>% 
-  left_join(neighbors) %>% 
-  left_join(sd_treat %>% 
-              rename(neighbor = seedling_id, neighb_sp = seedling_sp, neighb_st = soil_type)) %>% 
-  bind_rows(size_treat %>% 
-              filter(date<= my("apr2021")))
+size_n = size %>% left_join(sd_treat) %>% 
+  filter(!is.na(seedling_sp))
 
 size_n_long = size_n %>% 
   left_join(size_n %>% 
@@ -76,6 +61,7 @@ size_n_long = size_n %>%
               dplyr::select(seedling_id, alive)  %>% 
               rename(neighbor = seedling_id, neighb_alive = alive))
 
+write_csv(size_n, here("data", "seedling_measurements", "size_master_all.csv"))
 write_csv(size_n_long, here("data", "seedling_measurements", "size_master.csv"))
 ```
 

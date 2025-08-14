@@ -1,0 +1,377 @@
+---
+title: "Repotting analysis"
+author: "Gabe Runte"
+date: "2023-11-28"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(here)
+library(janitor)
+library(lubridate)
+library(gganimate)
+
+pine_col = "#558564"
+oak_col = "#E1dd8F"
+cont_col = "#B9CDDA" # "#65524D" # "#664147"
+
+scalefill_soil = scale_fill_manual(name = "Soil Type", breaks = c("P", "Q", "C"), labels = c("Bigcone soil", "Oak soil", "Sterile soil"),
+                                   values = c(pine_col, oak_col, cont_col))
+scalecolor_soil = scale_color_manual(name = "Soil Type", breaks = c("P", "Q", "C"), labels = c("Bigcone soil", "Oak soil", "Sterile soil"),
+                                   values = c(pine_col, oak_col, cont_col))
+
+scalefill_species = scale_fill_manual(name = "Seedling Species", breaks = c("P", "Q"), labels = c("Bigcone", "Oak"),values = c(pine_col, oak_col))
+scalecolor_species = scale_color_manual(name = "Seedling Species", breaks = c("P", "Q"), labels = c("Bigcone", "Oak"),values = c(pine_col, oak_col))
+
+white_font = theme(text = element_text(colour = "white"), 
+        axis.text = element_text(color = "white"),
+        axis.text.x = element_text(color = "white"),
+        axis.text.y = element_text(color = "white"),
+        strip.text = element_text(color = "white"),
+        legend.text = element_text(color = "white"),
+        legend.title = element_text(color = "white"),
+        panel.background = element_rect(fill = "black", color = NA), # Change panel background to black
+        plot.background = element_rect(fill = "black", color = NA))
+```
+
+
+
+```{r}
+rp_roots = read_csv(here("data/repotting", "ghecto_repotting_root_pulling_data.csv")) %>% clean_names()
+rp_presize = read_csv(here("data/seedling_measurements", "measurements_mar2021.csv")) %>% clean_names()
+rp_scans = read_csv(here("data/repotting", "seedling_scan_data.csv")) %>% clean_names()
+treat = read_csv(here("data/design", "seedling_treatments.csv"))
+neighbor_wide = read_csv(here("data/design", "ghecto_neighbor_pairs.csv"))
+neighbors = neighbor_wide %>% 
+  select(2:3) %>% rename(seedling_id = seedling_1, neighbor = seedling_2) %>% 
+  bind_rows(neighbor_wide %>% select(2:3) %>% rename(seedling_id = seedling_2, neighbor = seedling_1)) %>% 
+  left_join(treat %>% 
+              rename(neighbor = seedling_id, neighb_sp = seedling_sp, neighb_st = soil_type))
+```
+
+```{r}
+repot = rp_roots %>% 
+  mutate(pct_col = colonization_numerator/colonization_denominator) %>% 
+  select(seedling_id, pct_col) %>% 
+  right_join(rp_presize %>% select(-notes)) %>% 
+  left_join(rp_scans %>% select(-seedling_sp, -notes, -height_cm)) %>% 
+  left_join(treat) %>% 
+  rename(shoot_area = above_area_cm2, root_area = underground_area_cm2) %>% 
+  mutate(root_shoot = root_area/shoot_area) %>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "Q" ~ "Oaks",
+    seedling_sp == "P" ~ "Bigcones"
+  )) %>% 
+  mutate(total_area = root_area+shoot_area)
+```
+
+```{r}
+ggplot(repot, aes(x = soil_type, y=root_shoot, fill = soil_type, color = soil_type))+
+  geom_boxplot(alpha = 0.85)+geom_point(alpha = 0.45, position = position_jitterdodge(jitter.width = 0.5))+lims(y = c(0,15))+facet_wrap(~sp_long)+scalefill_soil+scalecolor_soil+theme_minimal()+white_font+ labs(x = "Soil Type", y = "Root:Shoot Ratio")
+
+ggsave(here("figures/labmeeting_nov2023", "repot_rootshoot.png"), width = 7, height = 5, dpi = 600)
+
+TukeyHSD(aov(lm(root_shoot~ soil_type, data = repot %>% filter(seedling_sp=="Q"))))
+TukeyHSD(aov(lm(root_shoot~ soil_type, data = repot %>% filter(seedling_sp=="P"))))
+
+```
+
+```{r}
+
+ggplot(repot, aes(x = soil_type , y=height_cm, fill = soil_type, color = soil_type))+
+  geom_boxplot(alpha = 0.85)+geom_point(alpha = 0.45, position = position_jitterdodge(jitter.width = 0.5))+facet_wrap(~sp_long, scales = "free")+scalefill_soil+scalecolor_soil+theme_minimal()+white_font+ labs(x = "Soil Type", y = "Seedling height (cm)")
+ggsave(here("figures/labmeeting_nov2023", "repot_height.png"), width = 7, height = 5, dpi = 600)
+
+ggplot(repot, aes(x = soil_type , y=diameter_mm, fill = soil_type, color = soil_type))+
+  geom_boxplot(alpha = 0.85)+geom_point(alpha = 0.45, position = position_jitterdodge(jitter.width = 0.5))+facet_wrap(~sp_long, scales = "free")+scalefill_soil+scalecolor_soil+theme_minimal()+white_font+ labs(x = "Soil Type", y = "Seedling diameter (mm)")
+ggsave(here("figures/labmeeting_nov2023", "repot_diameter.png"), width = 7, height = 5, dpi = 600)
+
+ggplot(repot, aes(x = soil_type , y=total_area, fill = soil_type, color = soil_type))+
+  geom_boxplot(alpha = 0.85)+geom_point(alpha = 0.45, position = position_jitterdodge(jitter.width = 0.5))+facet_wrap(~sp_long, scales = "free")+scalefill_soil+scalecolor_soil+theme_minimal()+white_font+ labs(x = "Soil Type", y = "Total plant size (square cm)")
+
+ggsave(here("figures/labmeeting_nov2023", "repot_totalsize.png"), width = 7, height = 5, dpi = 600)
+
+TukeyHSD(aov(lm(height_cm~ soil_type, data = repot %>% filter(seedling_sp=="Q"))))
+TukeyHSD(aov(lm(height_cm~ soil_type, data = repot %>% filter(seedling_sp=="P"))))
+
+```
+
+
+```{r}
+ggplot(repot, aes(x = soil_type , y=pct_col, fill = soil_type, color = soil_type))+
+  geom_boxplot(alpha = 0.85)+geom_point(alpha = 0.45, position = position_jitterdodge(jitter.width = 0.5))+facet_wrap(~sp_long, scales = "free")+scalefill_soil+scalecolor_soil+theme_minimal()+white_font+ labs(x = "Soil Type", y = "Seedling diameter (mm)")
+ggsave(here("figures/labmeeting_nov2023", "repot_colonization.png"), width = 7, height = 5, dpi = 600)
+
+TukeyHSD(aov(lm(pct_col~ soil_type, data = repot %>% filter(seedling_sp=="Q"))))
+TukeyHSD(aov(lm(pct_col~ soil_type, data = repot %>% filter(seedling_sp=="P"))))
+```
+
+
+```{r}
+
+ggplot(repot %>% 
+         filter(root_shoot<60) %>% 
+         filter(!soil_type == "C"), aes(x = pct_col , y=total_area, color = soil_type))+geom_point(alpha = 0.45)+facet_wrap(~sp_long, scales = "free")+scalecolor_soil+theme_minimal()+white_font+ labs(x = "Percent colonization", y = "Height (cm)")+ geom_smooth(method = "lm")
+ggsave(here("figures/labmeeting_nov2023", "repot_colonization_area.png"), width = 7, height = 5, dpi = 600)
+
+summary(lm(total_area~ pct_col+soil_type, data = repot %>% filter(seedling_sp=="Q")))
+summary(lm(total_area~ pct_col+soil_type, data = repot %>% filter(seedling_sp=="P")))
+```
+
+
+want to look at growth prior to drought
+
+```{r}
+growth = read_csv(here("data/seedling_measurements", "size_master.csv"))%>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "Q" ~ "Oaks",
+    seedling_sp == "P" ~ "Bigcones"
+  )) %>% 
+  mutate(timepoint = as.numeric(date))
+
+ggplot(growth %>%
+         filter(date <"2022-08-01"), aes(x = date, y= height_cm, group = seedling_id, color = soil_type))+
+  geom_line(alpha= 0.5 )+facet_wrap(~sp_long, scales = "free")+scalecolor_soil+theme_minimal()+white_font
+ggsave(here("figures/labmeeting_nov2023", "growth_predrought.png"), width = 7, height = 5, dpi = 600)
+
+ggplot(growth, aes(x = date, y= height_cm, group = seedling_id, color = soil_type))+
+  geom_line(alpha= 0.5 )+facet_wrap(~sp_long, scales = "free")+scalecolor_soil+theme_minimal()+white_font
+ggsave(here("figures/labmeeting_nov2023", "growth_inpot.png"), width = 7, height = 5, dpi = 600)
+
+#an animated plot is made below
+growth.plot = ggplot(growth %>%
+         filter(date <"2022-08-01"), aes(x = date, y= height_cm, group = seedling_id, color = soil_type))+
+  geom_line(alpha= 0.5 )+facet_wrap(~sp_long, scales = "free")+scalecolor_soil+theme_minimal()+white_font+transition_reveal(timepoint)
+
+  animate(growth.plot, duration = 8, renderer = gifski_renderer(loop = TRUE),
+          height = 5, width = 7, units = "in", res = 300)
+
+  anim_save(here("figures/labmeeting_nov2023", "growgif.gif"))
+```
+
+```{r}
+moist = read_csv(here("data", "drought_soilmoisture.csv")) %>% 
+  clean_names() %>% rename(pot = pot_id, treatment = drought_or_control) %>% 
+  mutate(date = as.Date(mdy(date)))
+
+
+
+ggplot(moist, aes(x = date, y = moisture,  color = treatment))+
+  geom_line(alpha = 0.15, aes(group = pot))+geom_smooth(method = "lm")+
+  labs(x = "Date (2022-2023)", y = "Percent soil moisture")+theme_minimal()+white_font+
+  scale_color_manual(breaks = c("C", "D"), name = "Treatment", labels = c("Watered", "Droughted"), values = c("#2541B2","#E4B363"))
+ggsave(here("figures/labmeeting_nov2023", "soil_moisture.png"), width = 7, height = 5, dpi = 600)
+
+```
+
+```{r}
+ndvi = read_csv(here("data/ndvi", "ndvi_data.csv")) %>% 
+  mutate(date = as.Date(mdy(date_time)))%>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "Q" ~ "Oaks",
+    seedling_sp == "P" ~ "Bigcones"
+  )) %>% 
+  left_join(growth %>% 
+              select(seedling_id, neighb_sp, neighb_st) %>% 
+              distinct)
+
+ggplot(ndvi %>% 
+         filter(!is.na(treatment)), aes(x = date, y = mean_ndvi,  color = treatment))+
+  geom_line(alpha = 0.15, aes(group = seedling_id))+geom_smooth(method = "lm")+facet_wrap(~sp_long)+
+  labs(x = "Date (2022-2023)", y = "Mean NDVI")+theme_minimal()+white_font+
+  scale_color_manual(breaks = c("C", "D"), name = "Treatment", labels = c("Watered", "Droughted"), values = c("#2541B2","#E4B363"))
+
+ggplot(ndvi %>% 
+         filter(!is.na(treatment)), aes(x = date, y = mean_ndvi,  color = treatment))+
+  geom_line(alpha = 0.15, aes(group = seedling_id))+geom_smooth(method = "lm")+facet_grid(rows = vars(sp_long), cols = vars(soil_type))+
+  labs(x = "Date (2022-2023)", y = "Mean NDVI")+theme_minimal()+white_font+
+  scale_color_manual(breaks = c("C", "D"), name = "Treatment", labels = c("Watered", "Droughted"), values = c("#2541B2","#E4B363"))
+
+
+ggplot(ndvi %>% 
+         filter(!is.na(treatment)) %>% 
+         filter(seedling_sp =="P") %>% 
+         filter(soil_type == "C") %>% 
+         filter(!is.na(neighb_st)), aes(x = as.factor(sample), y = mean_ndvi,  color = treatment))+
+  geom_boxplot(alpha = 0.15)+facet_grid(rows = vars(neighb_sp), cols = vars(neighb_st))+
+  labs(x = "Date (2022-2023)", y = "Mean NDVI")+theme_minimal()+white_font+
+  scale_color_manual(breaks = c("C", "D"), name = "Treatment", labels = c("Watered", "Droughted"), values = c("#2541B2","#E4B363"))
+
+ggplot(ndvi %>% 
+         filter(!is.na(treatment)) %>% 
+         filter(seedling_sp =="Q") %>% 
+         filter(soil_type == "C") %>% 
+         filter(neighb_sp == "Q") %>% 
+         filter(!is.na(neighb_st)), aes(x = as.factor(sample), y = mean_ndvi,  color = treatment))+
+  geom_boxplot(alpha = 0.15)+facet_grid(rows = vars(neighb_sp), cols = vars(neighb_st))+
+  labs(x = "Date (2022-2023)", y = "Mean NDVI")+theme_minimal()+white_font+
+  scale_color_manual(breaks = c("C", "D"), name = "Treatment", labels = c("Watered", "Droughted"), values = c("#2541B2","#E4B363"))
+```
+
+```{r}
+mass = read_csv(here("data/harvest", "harvest_biomass.csv")) %>% 
+  select(1:3) %>% 
+  mutate(compartment = case_when(
+    compartment == "F" ~ "foliar",
+    compartment == "A" ~ "shoot",
+    compartment == "B" ~ "root",
+    compartment == "G" ~ "pre_foliar",
+    compartment == "H" ~ "mid_foliar",
+    compartment == "M" ~ "midday_shoot",
+    compartment == "P" ~ "predawn_shoot",
+  )) %>% 
+  group_by(seedling_id, compartment) %>% 
+  slice(1) %>% ungroup() %>% 
+  pivot_wider(names_from = compartment, values_from = mass) %>% 
+  mutate(foliar = rowSums(select(., foliar, pre_foliar, mid_foliar), na.rm = TRUE))%>% 
+  mutate(shoot = rowSums(select(., shoot, midday_shoot, predawn_shoot), na.rm = TRUE)) %>% 
+  select(seedling_id, shoot, root, foliar)
+
+#write_csv(mass, here("data/harvest", "harvest_biomass_wideclean.csv"))
+
+mass_plot = mass %>% 
+  drop_na() %>% 
+  left_join(treat) %>% 
+  left_join(neighbors)%>% 
+  filter(!is.na(neighb_sp)) %>% 
+  filter(seedling_id != 3547) %>%  #infinite rootshoot
+  mutate(above = shoot+foliar) %>% 
+  mutate(rootshoot = root/above)%>% 
+  mutate(total = root+above)
+
+mass_rel = mass_plot %>% 
+  group_by(seedling_sp)  %>% 
+  mutate(shoot = (shoot-mean(shoot))/sd(shoot))%>% 
+  mutate(root = (root-mean(root))/sd(root))%>% 
+  mutate(foliar = (foliar-mean(foliar))/sd(foliar))%>% 
+  mutate(above = (above-mean(above))/sd(above))%>% 
+  mutate(rootshoot = (rootshoot-mean(rootshoot))/sd(rootshoot))%>% 
+  mutate(total = (total-mean(total))/sd(total)) %>% 
+  mutate(sp_long = case_when(
+    seedling_sp =="Q" ~"Oak seedling",
+    seedling_sp =="P" ~"Bigcone seedling"
+  ))%>% 
+  mutate(nsp_long = case_when(
+    neighb_sp =="Q" ~"Oak neighbor",
+    neighb_sp =="P" ~"Bigcone neighbor"
+  ))
+
+```
+
+
+
+```{r}
+nspfill = scale_fill_manual(name = "Neighbor Species", breaks = c("P", "Q"), labels = c("Bigcone", "Oak"),values = c(pine_col, oak_col))
+
+ggplot(mass_rel, aes(x = soil_type, y = total, fill = neighb_sp))+labs(x = "Soil type", y = "Total biomass")+
+  geom_boxplot(alpha = 0.95)+facet_wrap(~sp_long)+theme_minimal()+white_font+nspfill
+
+ggplot(mass_rel, aes(x = soil_type, y = rootshoot, fill = neighb_sp))+labs(x = "Soil type", y = "Root:Shoot ratio")+
+  geom_boxplot(alpha = 0.95)+facet_wrap(~sp_long)+lims(y = c(-2,4))+theme_minimal()+white_font+nspfill
+
+# 
+TukeyHSD(aov(lm(total~ soil_type*neighb_sp, data = mass_rel %>% filter(seedling_sp=="Q"))))
+TukeyHSD(aov(lm(total~ soil_type*neighb_sp, data = mass_rel %>% filter(seedling_sp=="P"))))
+
+TukeyHSD(aov(lm(rootshoot~ soil_type*neighb_sp, data = mass_rel %>% filter(seedling_sp=="Q"))))
+TukeyHSD(aov(lm(rootshoot~ soil_type*neighb_sp, data = mass_rel %>% filter(seedling_sp=="P"))))
+```
+
+Now I want to know if this correlates with colonization rates.
+```{r}
+htips = read_csv(here("data", "harvest/harvest_roottips - all.csv")) %>% 
+  select(seedling_id, colonized, uncolonized) %>% 
+  mutate(pct_col = colonized/(colonized+uncolonized)) %>% 
+  mutate(pct_col = case_when(
+    is.na(pct_col)~0,
+    !is.na(pct_col)~pct_col
+  )) %>% 
+  mutate(seedling_id = as.numeric(seedling_id))
+
+masscol = mass_rel %>% 
+  left_join(htips)
+
+
+ggplot(masscol, aes(x = pct_col, y = rootshoot, color = neighb_sp))+
+  geom_point()+facet_wrap(~seedling_sp)
+
+ggplot(masscol, aes(x = pct_col, y = total, color = neighb_sp))+
+  geom_point()+facet_grid(rows = vars(seedling_sp), cols = vars(soil_type))+geom_smooth(method = "lm")
+```
+
+```{r}
+ndvi_plot = ndvi %>% 
+  left_join(treat) %>% 
+  left_join(neighbors) %>% 
+  filter(sample == 4) %>% 
+  mutate(num_sp = case_when(
+    seedling_sp == neighb_sp ~ 1,
+    seedling_sp != neighb_sp ~2
+  ))%>% 
+  mutate(num_soils = case_when(
+    soil_type == "P" & neighb_st == "Q" ~ 2,
+    soil_type == "Q" & neighb_st == "P" ~ 2,
+    soil_type ==  neighb_st  ~ 1,
+    .default = 1
+  )) %>% 
+  filter(!is.na(num_sp))%>% 
+  mutate(sp_long = case_when(
+    seedling_sp =="Q" ~"Oak seedling",
+    seedling_sp =="P" ~"Bigcone seedling"
+  ))%>% 
+  mutate(nsp_long = case_when(
+    neighb_sp =="Q" ~"Oak neighbor",
+    neighb_sp =="P" ~"Bigcone neighbor"
+  ))
+
+n_pine = ndvi_plot %>% 
+  filter(seedling_sp == "P")
+
+ggplot(ndvi_plot, aes(x = as.factor(num_sp), y = mean_ndvi, fill = as.factor(num_soils)))+
+  geom_boxplot(alpha = 0.9)+facet_wrap(~sp_long)+labs(x = "Number of seedling species in the pot", y = "Mean NDVI")+
+  theme_minimal()+white_font+scale_fill_manual(name = "Number of soil histories", breaks = c("1","2"), labels = c("1 live soil", "2 live soils"), values = c("#E36588","#662C91"))
+
+TukeyHSD(aov(lm(mean_ndvi~ as.factor(num_sp)*as.factor(num_soils), data = ndvi_plot %>% filter(seedling_sp=="Q"))))
+TukeyHSD(aov(lm(mean_ndvi~ as.factor(num_sp)*as.factor(num_soils), data = ndvi_plot %>% filter(seedling_sp=="P"))))
+
+TukeyHSD(aov(lm(mean_ndvi~ as.factor(num_sp)*as.factor(num_soils)*seedling_sp, data = ndvi_plot )))
+
+```
+
+```{r}
+ndvi_colo = ndvi_plot %>% 
+  left_join(repot %>% select(seedling_id, pct_col) %>% rename(repot_col = pct_col)) %>% 
+  left_join(htips %>% select(seedling_id, pct_col) %>% rename(harv_col = pct_col)) 
+  
+
+
+
+ggplot(ndvi_colo, aes(x = harv_col, y = mean_ndvi, color = soil_type))+labs(x = "Percent colonization", y = "Mean NDVI")+
+   geom_point()+facet_wrap(~sp_long)+geom_smooth(method = "lm")+scalecolor_soil+theme_minimal()+white_font
+
+ggplot(ndvi_colo %>% 
+         filter(harv_col >0), aes(x = harv_col, y = mean_ndvi, color = soil_type))+labs(x = "Percent colonization", y = "Mean NDVI")+
+   geom_point()+facet_grid(cols = vars(sp_long), rows = vars(treatment))+geom_smooth(method = "lm")+scalecolor_soil+theme_minimal()+white_font
+
+TukeyHSD(aov(lm(mean_ndvi~ harv_col*soil_type*seedling_sp, data = ndvi_colo )))
+anova(lm(mean_ndvi~ harv_col*soil_type*seedling_sp, data = ndvi_colo ))
+summary(lm(mean_ndvi~ harv_col*soil_type*seedling_sp, data = ndvi_colo ))
+
+```
+
+
+```{r}
+library(pscl)
+
+summary(m1 <- zeroinfl(mean_ndvi ~ harv_col + seedling_sp , data = ndvi_colo))
+
+install.packages("gamlss")
+library(gamlss)
+
+model <- gamlss(mean_ndvi ~ harv_col + seedling_sp, family = ZIBNB, data = na.omit(ndvi_colo))
+```
+
+

@@ -19,13 +19,13 @@ library(dada2)
 
 
 ```{r}
-consensus = read_csv(here("data", "full_0622_consensus.csv")) %>% 
+consensus = read_csv(here("data", "sanger_data", "full_0622_consensus.csv")) %>% 
   clean_names() %>% 
   dplyr::select(name, sequence) %>% 
   rename(sequence_list_name = name)
 
 
-dest_tips_messy = read_csv(here("data", "full_0622_contigs.csv")) %>% 
+dest_tips_messy = read_csv(here("data", "sanger_data", "full_0622_contigs.csv")) %>% 
   clean_names() %>% 
   filter(!is.na(percent_gc)) 
 
@@ -39,9 +39,9 @@ plateset = dest_tips_messy %>%
   rename(newplate = plate, newcolumn = column, newrow = row)
 
 rev_set = read_csv(here("data", "tipstosequence_may2022.csv")) %>% 
- dplyr:: select(!c(1,2,3,7)) %>% 
+ # dplyr::select(!c(1,2,3,7)) %>% 
   mutate(plate = substr(plate, 5,6))%>% 
-  mutate(newplate = substr(newplate, 5,6))
+  mutate(newplate =  30)#substr(newplate, 5,6))
 
 plateset_clean = plateset %>% 
   left_join(rev_set) %>% 
@@ -89,24 +89,24 @@ dest_tips = dest_tips_long %>%
 
 
 ```{r}
-tip.wells = read_csv(here("data", "ghecto_repotting_root_pulling_data.csv"))
+tip.wells = read_csv(here("data", "repotting", "ghecto_repotting_root_pulling_data.csv"))
 
 tips.long = tip.wells %>% 
   pivot_longer(A:H, names_to = "well", values_to = "morphotype" ) %>% 
   mutate(plate = as.numeric(substr(plate, 5,6))) %>% 
   mutate(well = tolower(well))
 
-seedlings = read_csv(here("data", "seedling_measurements.csv")) %>% 
+seedlings = read_csv(here("data", "seedling_measurements", "seedling_measurements.csv")) %>% 
   clean_names()
 seedlings = seedlings[(match(unique(seedlings$seedling_id), seedlings$seedling_id)),] %>% 
   dplyr::select(seedling_id, seedling_sp, soil_type)
 
 
 
-community = read_csv(here("data", "seedling_measurements.csv")) %>% 
+community = read_csv(here("data", "seedling_measurements", "seedling_measurements.csv")) %>% 
   clean_names()
 
-pulled_tips = read_csv(here("data", "ghecto_repotting_root_pulling_data.csv")) %>% 
+pulled_tips = read_csv(here("data", "repotting", "ghecto_repotting_root_pulling_data.csv")) %>% 
   mutate(pct_colonization = colonization_numerator/ colonization_denominator)
 tips_longer = pulled_tips %>% 
   pivot_longer(cols=6:13, names_to = "row", values_to = "morphotype") %>% 
@@ -142,7 +142,7 @@ write_csv(dest_tiptaxa, here("data", "desttips_taxa_all0622.csv"))
 
 
 ```{r}
-dest_tiptaxa = read_csv(here("data", "desttips_taxa_all0622.csv")) %>% 
+dest_tiptaxa = read_csv(here("data","sanger_data",  "desttips_taxa_all0622.csv")) %>% 
   left_join(seedlings) %>% 
   clean_names() %>% 
   mutate(gensp = paste(substr(genus, 4, nchar(genus)), substr(species, 4, nchar(species)))) %>% 
@@ -155,6 +155,7 @@ dest_guilds = read_csv(here("data", "desttips_taxa_ff.guilds.csv")) %>%
   mutate(column = as.numeric(column))
 
 dest_master = dest_tiptaxa %>% 
+  select(-notes) %>% 
   left_join(dest_guilds)
 
 dest_sym = dest_master %>% 
@@ -168,14 +169,15 @@ filter(grepl('Ectomycorrhizal', guild))
 
 
 ```{r}
+dest_ect = read_csv(here("data", "sanger_data", "ecto_desttips_10122022.csv"))
 
 ggplot(dest_tiptaxa, aes(fill=gensp,  x=as.factor(seedling_id))) + 
     geom_bar(position="stack") +
   facet_grid(rows =vars(seedling_sp), cols = vars(soil_type) , scales = "free_x" )
 
-ggplot(dest_sym, aes(fill=gensp,  x=as.factor(seedling_id))) + 
-    geom_bar(position="stack") +
-  facet_grid(rows =vars(seedling_sp), cols = vars(soil_type), scales = "free_x" )
+# ggplot(dest_sym, aes(fill=gensp,  x=as.factor(seedling_id))) + 
+#     geom_bar(position="stack") +
+#   facet_grid(rows =vars(seedling_sp), cols = vars(soil_type), scales = "free_x" )
 
 
 dest_ect = dest_ect %>% 
@@ -195,7 +197,16 @@ ggplot(dest_ect, aes(fill=gensp,  x=as.factor(seedling_id))) +
   theme(
   axis.text.x = element_blank(),
   axis.ticks = element_blank()) +
-  labs(x = "Seedling", y= "Tip Count")
+  labs(x = "Seedling", y= "Tip Count") + guides(fill=guide_legend(title="Genus, species"))+theme_minimal()#+white_font
+
+ggplot(dest_ect, aes(fill=gensp,  x=morphotype)) + 
+    geom_bar(position="stack") +
+  facet_grid(rows =vars(sp.long), cols = vars(st.long) , scales = "free_x" ) +
+  theme_bw()+ 
+  theme(
+  axis.text.x = element_blank(),
+  axis.ticks = element_blank()) +
+  labs(x = "Seedling", y= "Tip Count") + guides(fill=guide_legend(title="Genus, species"))+theme_minimal()
 
 #ggsave(here("figures", "tip_ids.jpg"), width = 7, height = 5)
 

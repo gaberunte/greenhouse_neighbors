@@ -1,0 +1,92 @@
+---
+title: "Repotting sanger review"
+author: "Gabe Runte"
+date: "2023-11-14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(here)
+library(janitor)
+library(tidyverse)
+
+```
+
+
+```{r}
+tips = read_csv(here("data", "repotting", "ghecto_repotting_root_pulling_data.csv")) %>% 
+  mutate(pct_colonization = colonization_numerator/ colonization_denominator)
+
+seedlings = read_csv(here("data", "seedling_measurements", "seedling_measurements.csv")) %>% 
+  clean_names() %>% 
+  filter(timepoint == 1) %>% 
+  select(seedling_id, seedling_sp, soil_type)
+
+tips_meta = tips %>% 
+  left_join(seedlings) %>% 
+  select(-puller, -tip_notes) %>% 
+  filter(!is.na(column))
+
+
+tips_longer = tips_meta %>% 
+  pivot_longer(cols=6:13, names_to = "row", values_to = "morphotype") %>% 
+  mutate(m_2nd = substr(morphotype, 2,2)) %>% 
+  mutate(morphotype = substr(morphotype, 1,1)) %>%
+  mutate(questionable = case_when(
+    morphotype == "Q" ~ 1,
+    m_2nd == "Q" ~ 1)) %>% 
+  mutate(questionable = case_when(
+    questionable == 1 ~ 1,
+    is.na(questionable) ~ 0)) %>% 
+  select(-m_2nd) %>% 
+  mutate(plate_short = as.numeric(substr(plate, 5,6))) %>% 
+  mutate(row = tolower(row))
+
+
+```
+
+```{r}
+## which trees have 8 morphotyped tips? 
+trees_w8 = tips_longer %>%
+  filter(!is.na(morphotype)) %>% 
+  group_by(seedling_id) %>% 
+  summarize(n = n()) %>% 
+  filter(n >= 6)
+
+set.seed(309)
+## now lets choose 8 trees of each spp x soil type that have 8 tips associated
+seq_set = tips_meta %>% 
+  filter(seedling_id %in% trees_w8$seedling_id) %>% 
+  filter(!is.na(pct_colonization))%>%
+  group_by(seedling_sp, soil_type) %>%
+  filter(plate < 219023) %>% 
+  filter(!soil_type =="C") %>% #have to do controls separately because of fewer full sets
+  sample_n(size = 8, replace = FALSE) %>% 
+  bind_rows(tips_meta %>% #pulling n=5 from the control groups
+  filter(plate < 219023)%>%
+  filter(complete.cases(select(., A:H)))%>% 
+  filter(soil_type =="C") %>% 
+  group_by(seedling_sp)%>% 
+  sample_n(size = 5, replace = FALSE)) %>% 
+  arrange(plate, column) %>% 
+  ungroup()  %>% 
+  mutate(re_plate = rep(c("repot_1", "repot_2", "repot_3", "repot_4"), each = 12, length.out = n())) %>% 
+  mutate(re_column = rep(1:12, length.out = n()))
+
+# write_csv(seq_set %>%
+#             select(1,4,5,15:18), here("data/sanger_data", "nov2023_repotting_seqset.csv"))
+
+  
+```
+
+
+
+```{r}
+ggplot(tips_longer %>% 
+         filter(!is.na(morphotype)), aes(x = as.factor(plate), fill = morphotype))+
+  geom_bar()
+```
+
+
+

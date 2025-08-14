@@ -1,0 +1,336 @@
+---
+title: "repotting_reanalysis_geltoplate"
+author: "Gabe Runte"
+date: "2023-11-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(vegan)
+library(here)
+library(janitor)
+library(gridExtra)
+library(RColorBrewer)
+```
+
+
+```{r}
+
+repot_1_gel = tibble(plate = "repot1", dilute = F, success = 
+  c(0,1,0,0,0,0,0,1,0,0,0,1,0,0,1,0,0,1,0,0,0,1,1,0,
+    1,1,0,1,0,1,1,0,0,0,1,0,1,0,1,0,1,0,1,0,1,0,0,0,
+    0,0,0,1,0,0,1,1,0,0,0,0,0,1,0,0,1,1,0,1,0,1,0,1,
+    0,0,1,1,0,0,1,1,0,0,0,0,0,1,1,0,1,1,1,0,0,1,0,0))%>% 
+  mutate(column = c(rep(1:2, 8), rep(3:4, 8), rep(5:6, 8), rep(7:8, 8), rep(9:10, 8), rep(11:12, 8))) %>% 
+  mutate(row = rep(rep(c("A", "B", "C", "D", "E", "F", "G", "H"), each = 2), 6)) %>% 
+  arrange(column, row) %>% 
+  mutate(colrow = paste0(column, row))
+
+
+repot_1_dilute_gel = tibble(plate = "repot1", dilute = T, success = 
+  c(0,1,0,0,0,1,0,1,0,1,0,1,1,1,1,1,0,1,1,0,1,1,1,0,
+    1,1,0,1,1,0,1,1,1,1,1,0,0,0,1,1,1,0,0,0,0,0,1,0,
+    0,0,0,1,0,1,1,1,0,0,0,0,0,1,0,1,1,0,0,0,0,1,0,0,
+    0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0))%>% 
+  mutate(column = c(rep(1:2, 8), rep(3:4, 8), rep(5:6, 8), rep(7:8, 8), rep(9:10, 8), rep(11:12, 8))) %>% 
+  mutate(row = rep(rep(c("A", "B", "C", "D", "E", "F", "G", "H"), each = 2), 6)) %>% 
+  arrange(column, row)%>% 
+  mutate(colrow = paste0(column, row))
+
+repot_2_gel= tibble(plate = "repot2", dilute = F, success = 
+  c(0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,1,0,0,0,0,0,0,1,0,
+    0,0,0,0,0,1,0,0,1,0,0,0,1,0,0,0,0,1,1,1,1,1,0,1,
+    0,1,0,0,0,1,1,1,0,1,0,1,1,1,0,0,0,1,1,0,0,0,1,1,
+    1,0,1,0,1,0,1,0,0,0,0,1,0,1,1,0,0,0,1,1,1,0,1,1))%>% 
+  mutate(column = c(rep(1:2, 8), rep(3:4, 8), rep(5:6, 8), rep(7:8, 8), rep(9:10, 8), rep(11:12, 8))) %>% 
+  mutate(row = rep(rep(c("A", "B", "C", "D", "E", "F", "G", "H"), each = 2), 6)) %>% 
+  arrange(column, row)%>% 
+  mutate(colrow = paste0(column, row))
+
+repot_2_dilute_gel = tibble(plate = "repot2", dilute = T, success = 
+  c(0,0,0,0,1,0,0,1,0,0,0,0,1,0,0,1,1,0,0,0,0,0,0,0,
+    0,0,0,0,0,1,0,1,1,0,1,0,1,1,1,0,1,1,1,1,1,0,1,0,
+    0,0,0,0,1,0,1,0,1,1,1,0,1,1,1,0,0,1,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))%>% 
+  mutate(column = c(rep(1:2, 8), rep(3:4, 8), rep(5:6, 8), rep(7:8, 8), rep(9:10, 8), rep(11:12, 8))) %>% 
+  mutate(row = rep(rep(c("A", "B", "C", "D", "E", "F", "G", "H"), each = 2), 6)) %>% 
+  arrange(column, row)%>% 
+  mutate(colrow = paste0(column, row))
+
+repot_3_gel = tibble(plate = "repot3", dilute = F, success = 
+  c(1,1,1,0,1,0,1,1,0,1,1,0,1,0,1,0,1,0,0,0,0,0,0,0,
+    1,0,1,0,1,0,1,0,1,1,0,0,0,1,1,0,0,0,0,0,1,0,1,0,
+    1,0,0,0,0,0,1,0,0,1,0,1,0,0,0,0,1,0,1,1,1,1,1,0,
+    1,1,1,1,0,0,1,0,1,0,1,0,1,0,0,0,1,0,1,0,1,0,1,0))%>% 
+  mutate(column = c(rep(1:2, 8), rep(3:4, 8), rep(5:6, 8), rep(7:8, 8), rep(9:10, 8), rep(11:12, 8))) %>% 
+  mutate(row = rep(rep(c("A", "B", "C", "D", "E", "F", "G", "H"), each = 2), 6)) %>% 
+  arrange(column, row)%>% 
+  mutate(colrow = paste0(column, row))
+
+all_gels = bind_rows(repot_1_gel, repot_1_dilute_gel, repot_2_gel, repot_2_dilute_gel, repot_3_gel)
+
+```
+
+
+```{r}
+repot1_dilute_add = repot_1_dilute_gel %>% 
+  mutate(colrow = paste0(column, row)) %>% 
+  filter(success == 1) %>% 
+  filter(!colrow %in% repot_1_gel$colrow[repot_1_gel$success==1])
+
+
+repot2_dilute_add = repot_2_dilute_gel %>% 
+  mutate(colrow = paste0(column, row)) %>% 
+  filter(success == 1) %>% 
+  filter(!colrow %in% repot_2_gel$colrow[repot_2_gel$success==1])
+
+
+seqset = all_gels %>% 
+  filter(dilute == F) %>% 
+  filter(success == 1) %>% 
+  bind_rows(repot1_dilute_add, repot2_dilute_add) %>% 
+  arrange(dilute,plate, column, row) %>% 
+  select(-colrow)
+```
+
+
+
+```{r}
+ids = read_csv(here("data/sanger_data", "nov2023_repotting_seqset.csv")) %>% 
+  mutate(re_plate = paste0(str_sub(re_plate, 1, 5), str_sub(re_plate, 7)))
+
+treat = read_csv(here("data/design", "seedling_treatments.csv"))
+
+meta = seqset %>% 
+  rename(re_plate = plate, re_column = column) %>% 
+  left_join(ids) %>% 
+  mutate(trt = paste0(seedling_sp, soil_type))
+
+
+
+
+
+meta_reps = meta %>% 
+  group_by(seedling_sp, soil_type) %>% 
+  summarize(n = n())
+
+
+tip_wells = read_csv(here("data", "repotting", "ghecto_repotting_root_pulling_data.csv"))
+
+tips_long = tip_wells %>% 
+  pivot_longer(A:H, names_to = "well", values_to = "morphotype" ) %>% 
+  mutate(plate = as.numeric(substr(plate, 5,6))) %>% 
+  mutate(well = tolower(well)) %>% 
+  filter(!is.na(morphotype)) %>% 
+  left_join(treat)%>% 
+  mutate(morphotype = str_sub(morphotype, 1,1))
+
+ggplot(tips_long, aes(x = morphotype, fill = seedling_sp))+
+  geom_bar()+facet_wrap(~seedling_sp)
+
+
+tips_merge = meta %>% 
+  mutate(plate = as.numeric(str_sub(plate,4))) %>% 
+  left_join(tips_long %>% 
+  rename(row = well) %>% 
+    mutate(row = toupper(row)) %>% 
+    select(plate, column, row, morphotype)) 
+
+ggplot(tips_merge, aes(morphotype, fill = seedling_sp))+
+  geom_bar()
+
+ggplot(tips_long, aes(morphotype, fill = seedling_sp))+
+  geom_bar()
+```
+
+```{r}
+
+seq_select = meta %>% 
+  mutate(plate = as.numeric(str_sub(plate, 4))) %>% 
+  left_join(tips_long %>% 
+              mutate(row = toupper(well)) %>% 
+              select(plate, column, row, morphotype)) %>% 
+  filter(!morphotype %in% c("X")) %>% 
+  group_by(seedling_id, seedling_sp, trt) %>% 
+  summarise(num_tips = n()) %>% 
+  filter(num_tips >2)
+  
+  
+seqset_trim = meta %>% 
+  mutate(plate = as.numeric(str_sub(plate, 4)))%>% 
+  left_join(tips_long %>% 
+              mutate(row = toupper(well)) %>% 
+              select(plate, column, row, morphotype))%>% 
+  filter(seedling_id %in% seq_select$seedling_id) %>% 
+  filter(trt != "PP")
+
+seqseq_c = seqset_trim %>% 
+  filter(soil_type == "C") %>% 
+  group_by(seedling_id) %>% 
+  sample_n(3)
+
+seqset_live = seqset_trim %>% 
+  filter(soil_type != "C") 
+
+seqset_final = bind_rows(seqset_live, seqseq_c) %>% 
+  arrange(dilute, re_plate, re_column, row)
+```
+
+
+checking representation of samples from previous anaylses
+
+```{r}
+dest_ect = read_csv(here("data", "sanger_data", "ecto_desttips_10122022.csv")) %>% 
+  group_by(seedling_sp, morphotype, soil_type) %>% 
+  summarize(n = n()) %>% 
+  ungroup() %>% 
+  group_by(seedling_sp) %>% 
+  mutate(ext_rel = n/sum(n))
+
+tips_rel = tips_long %>% 
+  group_by(seedling_sp, morphotype, soil_type) %>% 
+  summarize(n_tot = n()) %>% 
+  ungroup() %>% 
+  group_by(seedling_sp) %>% 
+  mutate(tot_rel = n_tot/sum(n_tot))
+
+tips_rel_sp = tips_long %>% 
+  group_by(seedling_sp, morphotype) %>% 
+  summarize(n_tot = n()) %>% 
+  ungroup() %>% 
+  group_by(seedling_sp) %>% 
+  mutate(tot_rel = n_tot/sum(n_tot))
+
+rep = tips_rel %>% 
+  left_join(dest_ect) %>% 
+  mutate(representation = ext_rel/tot_rel) %>% 
+  filter(n_tot >5) %>% 
+  filter(!morphotype %in% c("Q", "X")) %>% 
+  filter(tot_rel>0.01)
+
+## Lets do this again but with the inclusion of the proposed tips in the seqset_final
+dest_seq = read_csv(here("data", "sanger_data", "ecto_desttips_10122022.csv")) %>% 
+  select(seedling_sp, morphotype, soil_type) %>% 
+  bind_rows(seqset_final) %>% 
+  group_by(seedling_sp, morphotype) %>% 
+  summarize(n = n()) %>% 
+  ungroup() %>% 
+  group_by(seedling_sp) %>% 
+  mutate(ext_rel = n/sum(n))
+
+
+rep_seq = tips_rel_sp %>% 
+  left_join(dest_seq) %>% 
+  mutate(representation = ext_rel/tot_rel) %>% 
+  filter(n_tot >5) %>% 
+  filter(!morphotype %in% c("Q", "X")) %>% 
+  filter(tot_rel>0.01)
+
+```
+a todo list for morphotypes
+```{r}
+rep_todo = rep_seq %>%
+  mutate(todo = case_when(
+    n < 12 ~ 12-n,
+    is.na(n)~ 10,
+    .default = 0
+  )) %>% 
+  select(seedling_sp, morphotype, todo) %>% 
+  mutate(sp_morpho = paste(seedling_sp, morphotype, sep = "_"))
+sum(rep_todo$todo)
+
+```
+
+```{r}
+setdone = read_csv(here("data", "sanger_data", "ecto_desttips_10122022.csv")) %>% 
+  mutate(done = T)%>% 
+  select(plate, column, row)
+setdoing = seqset_final %>% 
+  select(plate, column, row)%>% 
+  mutate(done = T)
+
+tipstopull = tips_long %>% 
+  rename(row = well) %>% 
+  mutate(row = toupper(row)) %>% 
+  left_join(setdone)%>% 
+  left_join(setdoing) %>% 
+  filter(is.na(done)) %>% 
+  select(seedling_id, plate, column, row, seedling_sp, morphotype)%>% 
+  mutate(sp_morpho = paste(seedling_sp, morphotype, sep = "_")) %>% 
+  filter(plate <23)
+
+set.seed(209)
+for(i in 1:length(rep_todo$sp_morpho)){
+  loopset = tipstopull %>%
+    filter(sp_morpho == rep_todo$sp_morpho[i]) %>%
+    sample_n(rep_todo$todo[i])
+
+  if(i == 1){
+    morphoset = loopset
+  } else {
+    morphoset = morphoset %>%
+      bind_rows(loopset)
+  }
+
+}
+
+morph_printout = morphoset %>% 
+  arrange(plate, column, row) %>% 
+  mutate(n_plate = "repot_5") %>% 
+  mutate(n_column = rep(1:12, each = 8, length.out = n())) %>% 
+  mutate(n_row = rep(c("A", "B", "C", "D", "E", "F", "G", "H"), length.out =n()))
+
+write_csv(morph_printout %>% 
+            select(2:4, 8:10), here("data/sanger_data", "nov2023_repotting_morphoset.csv") )
+
+seqset_printout = seqset_final  %>% 
+  mutate(n_column = rep(1:12, each = 8, length.out = n())) %>% 
+  mutate(n_row = rep(c("A", "B", "C", "D", "E", "F", "G", "H"), length.out =n()))%>% 
+  select(re_plate, re_column, row, n_column, n_row)
+
+write_csv(seqset_printout, here("data/sanger_data", "nov2023_repotting_mclab.csv") )
+```
+
+```{r}
+repot_5_gel = tibble(plate = "repot5", dilute = F, success = 
+  c(0,0,1,0,0,1,0,0,0,0,0,1,0,0,0,1,0,0,1,1,0,1,0,1,
+    0,1,0,1,0,0,1,1,0,0,1,1,1,1,1,1,0,1,1,0,0,0,1,1,
+    0,0,0,1,1,1,1,1,1,0,1,0,0,1,1,1,1,0,0,0,1,0,0,0,
+    0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0))%>% 
+  mutate(column = c(rep(1:2, 8), rep(3:4, 8), rep(5:6, 8), rep(7:8, 8), rep(9:10, 8), rep(11:12, 8))) %>% 
+  mutate(row = rep(rep(c("A", "B", "C", "D", "E", "F", "G", "H"), each = 2), 6)) %>% 
+  arrange(column, row) %>% 
+  mutate(colrow = paste0(column, row))
+
+
+repot_5_dilute_gel = tibble(plate = "repot5", dilute = T, success = 
+  c(0,0,1,0,0,1,0,0,0,0,0,0,0,1,1,1,0,0,1,1,0,1,1,0,
+    1,1,1,1,1,0,1,1,0,1,1,1,1,1,1,0,1,1,1,1,1,0,0,1,
+    0,0,1,1,1,1,1,0,0,0,1,1,1,0,0,1,1,0,1,0,0,0,1,1,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+    ))%>% 
+  mutate(column = c(rep(1:2, 8), rep(3:4, 8), rep(5:6, 8), rep(7:8, 8), rep(9:10, 8), rep(11:12, 8))) %>% 
+  mutate(row = rep(rep(c("A", "B", "C", "D", "E", "F", "G", "H"), each = 2), 6)) %>% 
+  arrange(column, row)%>% 
+  mutate(colrow = paste0(column, row))
+
+
+repot5_dilute_add = repot_5_dilute_gel %>% 
+  mutate(colrow = paste0(column, row)) %>% 
+  filter(success == 1) %>% 
+  filter(!colrow %in% repot_5_gel$colrow[repot_5_gel$success==1])
+
+repot_5_seqset = repot_5_gel %>% 
+  filter(success == 1) %>% 
+  bind_rows(repot5_dilute_add) %>% 
+  arrange(dilute,plate, column, row) %>% 
+  select(-colrow)
+
+write_csv(repot_5_seqset, here("data/sanger_data", "dec2023_repot_5_mclab.csv") )
+
+```
+
+

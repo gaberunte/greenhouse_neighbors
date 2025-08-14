@@ -1,0 +1,36 @@
+seedling_sp,soil_type,morphotype,assignment
+Q,P,A,Pustularia sp.
+P,Q,Z,Pustularia sp.
+P,Q,Y,NM
+Q,P,O,Pustularia sp.
+P,P,O,Pustularia sp.
+Q,Q,B,Tuber sp.
+Q,Q,C,Rhizopogon hawkerae
+Q,C,B,Tuber sp.
+P,P,X,Rhizopogon hawkerae
+P,Q,X,Rhizopogon hawkerae
+P,C,X,Rhizopogon hawkerae
+Q,P,C,Rhizopogon hawkerae
+P,Q,N,NM
+P,P,Y,NM
+Q,C,A,Pustularia sp.
+P,P,Z,Pustularia sp.
+Q,Q,D,Tuber sp.
+Q,C,D,NM
+P,Q,W,NM
+P,C,W,NM
+Q,P,D,Pustularia sp.
+Q,Q,A,Pustularia sp.
+Q,Q,E,NM
+Q,Q,F,Pustularia sp.
+Q,Q,N,NM
+Q,P,F,Pustularia sp.
+Q,C,G,Pustularia sp.
+Q,Q,G,Pustularia sp.
+P,P,W,NM
+Q,Q,H,Melanogaster sp.
+Q,P,G,Pustularia sp.
+P,P,N,NM
+Q,C,X,Rhizopogon hawkerae
+Q,C,N,NM
+Q,C,F,Pustularia sp.

@@ -1,0 +1,71 @@
+---
+title: "Soil nutrients"
+author: "Gabe Runte"
+date: "2024-07-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+source(here("src", "colors.R"))
+library(janitor)
+library(here)
+library(tidyverse)
+
+```
+
+```{r}
+soils_cn = read_csv(here("data/soil_nutrients", "soils_cn.csv"))%>% 
+  clean_names() %>% select(1,2,4:6)
+soils_trace = read_csv(here("data/soil_nutrients", "soils_trace.csv")) %>% 
+  clean_names()%>% select(1,2,4:26)
+
+soils = left_join(soils_cn, soils_trace) %>% 
+  mutate(rep = str_sub(sample_description_number_1, 2,2))%>% 
+  mutate(sample_description_number_1 = str_sub(sample_description_number_1, 1,1)) %>% 
+  rename(location = sample_location, set = sample_description_number_1) %>% 
+  mutate(set = case_when(
+    set== "B"~"P",
+    set== "O"~"Q",
+    set== "S"~"C",
+    .default = set
+  ))
+```
+
+```{r}
+ggplot(soils, aes(x = set, y = c_n_ratio, fill = set))+
+  geom_boxplot()
+
+TukeyHSD(aov(c_n_ratio~set, data = soils))
+
+
+cn_means = soils %>%
+  rename(soil_type = set) %>% 
+  group_by(soil_type) %>% 
+  summarize(cn_ratio = mean(c_n_ratio))
+
+
+
+cn_means_adj = cn_means %>% 
+  mutate(cn_adj = c(cn_means$cn_ratio[1], 
+                    0.8*cn_means$cn_ratio[1]+0.2*cn_means$cn_ratio[2],
+                    0.8*cn_means$cn_ratio[1]+0.2*cn_means$cn_ratio[3]))
+
+ggplot(cn_means_adj, aes(x = soil_type, y = cn_adj, col = soil_type))+
+  geom_point(size = 5)
+```
+
+```{r}
+soils_stat = soils %>% 
+  mutate(c_n_ratio = case_when(
+    set == "P" ~ 0.8*cn_means$cn_ratio[1]+0.2*c_n_ratio,
+    set == "Q" ~ 0.8*cn_means$cn_ratio[1]+0.2*c_n_ratio,
+    .default = c_n_ratio
+  ))
+
+TukeyHSD(aov(c_n_ratio~set, data = soils_stat))
+
+```
+
+
+
