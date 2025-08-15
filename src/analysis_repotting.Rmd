@@ -1,0 +1,1640 @@
+---
+title: "Repot Analyses"
+author: "Gabe Runte"
+date: "2024-01-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(here)
+library(patchwork)
+library(multcompView)
+library(janitor)
+library(RColorBrewer)
+library(tidyverse)
+library(viridis)
+
+source(here("src", "colors.R"))
+```
+
+
+I begin by reading in the relevant data.
+```{r, message = F}
+health = read_csv(here("data", "analysis/ndvi_data.csv"))
+measure = read_csv(here("data", "analysis/size_master.csv"))
+repot_tips = read_csv(here("data", "repotting/ghecto_repotting_root_pulling_data.csv"))
+trt = read_csv(here("data", "design", "seedling_treatments.csv"))
+repot_comm = read_csv(here("data", "repotting", "repot_community_matrix_scaled.csv")) 
+repot_scan = read_csv(here("data/repotting", "seedling_scan_data.csv")) %>% 
+  select(-seedling_sp, -notes)
+repot_mass = read_csv(here("data", "repotting", "repotting_drymass_fitted.csv"))
+
+```
+
+```{r}
+colonization = repot_tips %>% 
+  mutate(repot_col = colonization_numerator/colonization_denominator) %>% 
+  select(seedling_id, repot_col) %>% 
+  left_join(trt)%>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  )) %>% 
+  mutate(soil_type = fct_relevel(soil_type, "P", "Q", "C"))
+
+img = repot_scan %>% 
+  rename(shoot = above_area_cm2, root= underground_area_cm2) %>% 
+  mutate(rs_ratio = root/shoot) %>% 
+  left_join(trt) %>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  )) %>%
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil", 
+    soil_type == "C" ~ "Control soil"
+  ))%>% 
+  mutate(total = root+shoot) %>% 
+  drop_na() %>% 
+  mutate(sp_st = paste0(seedling_sp, soil_type)) %>% 
+  mutate(soil_type = fct_relevel(soil_type, "P", "Q", "C"))
+drought_treat = health %>% 
+  select(seedling_id, treatment) %>% distinct()
+total_treat = measure %>% 
+  select(seedling_id, seedling_sp, soil_type, neighbor, neighb_sp, neighb_st, pot) %>% distinct() %>% drop_na() %>% left_join(drought_treat)
+```
+
+RS Ratio
+```{r}
+TukeyHSD(aov(lm(rs_ratio~soil_type, data = img%>% 
+         filter(rs_ratio <40) %>% 
+           filter(seedling_sp == "P"))))
+
+TukeyHSD(aov(lm(rs_ratio~soil_type, data = img%>% 
+         filter(rs_ratio <40) %>% 
+           filter(seedling_sp == "Q"))))
+
+
+rs_plot = ggplot(img %>% 
+         filter(rs_ratio <40), aes(x = sp_long, y = rs_ratio, fill = soil_type))+ 
+  geom_point(aes(color = soil_type), alpha = 0.15, position = position_jitterdodge(jitter.width = .1))+ gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "", y = "Root:Shoot Ratio")+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+rs_plot
+```
+
+Total size
+```{r}
+anova = aov(aov(total~seedling_sp*soil_type, data = img))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$`seedling_sp:soil_type`)
+  htib = tibble(sp_st = rownames(dfx),
+                letters = dfx$Letters,
+                seedling_sp = str_sub(sp_st, 1,1),
+                soil_type = str_sub(sp_st, 3,3)) %>% 
+    select(-sp_st)
+
+img_tuk = img %>%  left_join(htib) %>% 
+  group_by(soil_type, seedling_sp) %>% 
+  mutate(lab_y = mean(total)+3*sd(total))
+
+
+TukeyHSD(aov(lm(total~soil_type, data = img%>% 
+         filter(rs_ratio <40) %>% 
+           filter(seedling_sp == "P"))))
+
+TukeyHSD(aov(lm(total~soil_type, data = img%>% 
+         filter(rs_ratio <40) %>% 
+           filter(seedling_sp == "Q")))) 
+
+
+ggplot(img_tuk, aes(x = sp_long, y = total, fill = soil_type, group = sp_st))+
+  geom_boxplot(alpha = 0.75)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Seedling Species", y = "Total area (cm2)")+ 
+    geom_text(aes(x = sp_long, y = 100, label = letters), size = 2.5)
+
+ggplot(img_tuk, aes(x = st_long, y = total, fill = soil_type))+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+
+  labs(x = "", y = "Total area (cm2)")+
+  facet_wrap(~sp_long)+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 4)
+```
+
+Just bigcones, R, S, RS
+```{r}
+imgp = img %>% 
+  filter(seedling_sp == "P")
+anova = aov(aov(root~soil_type, data = imgp))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$soil_type)
+  htib = tibble(soil_type = rownames(dfx),
+                letters = dfx$Letters) 
+
+imgp_tuk = imgp %>%  left_join(htib) %>% 
+  group_by(soil_type) %>% 
+  mutate(lab_y = mean(root)+3*sd(root))%>% 
+  ungroup() %>% 
+  mutate(st_long = fct_relevel(st_long, "Bigcone soil", "Oak soil", "Control soil"))
+
+ggplot(imgp_tuk, aes(x = st_long, y = root, fill = soil_type))+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root area (cm2)")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 5)
+```
+
+```{r}
+imgp = repot_mass %>% 
+  rename(root = below_dry)%>% 
+  rename(shoot = above_dry) %>% 
+  mutate(rs = root/shoot) %>% 
+  filter(seedling_sp == "P") %>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  )) %>%
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Control soil"
+  ))
+anova = aov(aov(root~soil_type, data = imgp))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$soil_type)
+  htib = tibble(soil_type = rownames(dfx),
+                letters = dfx$Letters) 
+
+imgp_tuk = imgp %>%  left_join(htib) %>% 
+  group_by(soil_type) %>% 
+  mutate(lab_y = quantile(root, probs = 0.75)+IQR(root)*1.75)%>% 
+  ungroup() %>% 
+  mutate(st_long = fct_relevel(st_long, "Bigcone soil", "Oak soil", "Control soil"))
+
+rmr = ggplot(imgp_tuk, aes(x = st_long, y = root, fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root mass (g)")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 5)+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+
+anova = aov(aov(shoot~soil_type, data = imgp))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$soil_type)
+  htib = tibble(soil_type = rownames(dfx),
+                letters = dfx$Letters) 
+
+imgp_tuk = imgp %>%  left_join(htib) %>% 
+  group_by(soil_type) %>% 
+  mutate(lab_y = quantile(shoot, probs = 0.75)+IQR(shoot)*1.75)%>% 
+  ungroup() %>% 
+  mutate(st_long = fct_relevel(st_long, "Bigcone soil", "Oak soil", "Control soil"))
+
+rms = ggplot(imgp_tuk, aes(x = st_long, y = shoot, fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Shoot mass (g)")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 5)+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+anova = aov(aov(rs~soil_type, data = imgp))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$soil_type)
+  htib = tibble(soil_type = rownames(dfx),
+                letters = dfx$Letters) 
+
+imgp_tuk = imgp %>%  left_join(htib) %>% 
+  group_by(soil_type) %>% 
+  mutate(lab_y = quantile(rs, probs = 0.75)+IQR(rs)*1.75)%>% 
+  ungroup() %>% 
+  mutate(st_long = fct_relevel(st_long, "Bigcone soil", "Oak soil", "Control soil"))
+
+rmrs = ggplot(imgp_tuk, aes(x = st_long, y = rs, fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root:Shoot ratio")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 5)+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+
+repot_bigconemass = rmr+rms+rmrs
+ggsave(plot = repot_bigconemass, width = 9, height = 5, here("figures", "repot_bigconemass.png"))
+
+
+```
+
+```{r}
+imgp = repot_mass %>% 
+  rename(root = below_dry)%>% 
+  rename(shoot = above_dry) %>% 
+  mutate(rs = root/shoot) %>% 
+  filter(seedling_sp == "P") %>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  )) %>%
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone",
+    soil_type == "Q" ~ "Oak",
+    soil_type == "C" ~ "Control"
+  ))
+anova = aov(aov(root~soil_type, data = imgp))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$soil_type)
+  htib = tibble(soil_type = rownames(dfx),
+                letters = dfx$Letters) 
+
+imgp_tuk = imgp %>%  left_join(htib) %>% 
+  group_by(soil_type) %>% 
+  mutate(lab_y = quantile(root, probs = 0.75)+IQR(root)*2.5)%>% 
+  ungroup() %>% 
+  mutate(st_long = fct_relevel(st_long, "Bigcone soil", "Oak soil", "Control soil"))
+
+rmr = ggplot(imgp_tuk, aes(y = st_long, x = root, fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(y = "Soil type", x = "Root mass (g)")+ theme(legend.position = "none")+
+    geom_text(aes(y = st_long, x = lab_y, label = letters), size = 5)+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))+
+  theme(axis.text.y = element_text(angle = 90, hjust = 1))+
+  scale_x_log10()
+
+
+anova = aov(aov(shoot~soil_type, data = imgp))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$soil_type)
+  htib = tibble(soil_type = rownames(dfx),
+                letters = dfx$Letters) 
+
+imgp_tuk = imgp %>%  left_join(htib) %>% 
+  group_by(soil_type) %>% 
+  mutate(lab_y = quantile(shoot, probs = 0.75)+IQR(shoot)*2.5)%>% 
+  ungroup() %>% 
+  mutate(st_long = fct_relevel(st_long, "Bigcone soil", "Oak soil", "Control soil"))
+
+rms = ggplot(imgp_tuk, aes(y = st_long, x = shoot, fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(y = "Soil type", x = "Shoot mass (g)")+ theme(legend.position = "none")+
+    geom_text(aes(y = st_long, x = lab_y, label = letters), size = 5)+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))+
+  theme(axis.text.y = element_text(angle = 90, hjust = 1))+
+  scale_x_log10()
+
+anova = aov(aov(rs~soil_type, data = imgp))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$soil_type)
+  htib = tibble(soil_type = rownames(dfx),
+                letters = dfx$Letters) 
+
+imgp_tuk = imgp %>%  left_join(htib) %>% 
+  group_by(soil_type) %>% 
+  mutate(lab_y = quantile(rs, probs = 0.75)+IQR(rs)*2.5)%>% 
+  ungroup() %>% 
+  mutate(st_long = fct_relevel(st_long, "Bigcone soil", "Oak soil", "Control soil"))
+
+rmrs = ggplot(imgp_tuk, aes(y = st_long, x = rs, fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(y = "Soil type", x = "Root:Shoot ratio")+ theme(legend.position = "none")+
+    geom_text(aes(y = st_long, x = lab_y, label = letters), size = 5)+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))+
+  theme(axis.text.y = element_text(angle = 90, hjust = 1))+
+  scale_x_log10()
+
+
+repot_bigconemass = rmr/rms/rmrs
+ggsave(plot = repot_bigconemass, width = 2, height = 8, here("figures", "repot_bigconemass_tall.png"))
+
+
+```
+
+
+
+```{r}
+anova = aov(aov(root~soil_type, data = imgp))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$soil_type)
+  htib = tibble(soil_type = rownames(dfx),
+                letters = dfx$Letters) 
+
+imgp_tuk = imgp %>%  left_join(htib) %>% 
+  group_by(soil_type) %>% 
+  mutate(lab_let = quantile(root, probs = 0.75)+IQR(root)*1.25)%>% 
+  ungroup() %>% 
+  mutate(st_long = fct_relevel(st_long, "Bigcone soil", "Oak soil", "Control soil"))
+
+df_summary <- imgp_tuk %>%
+  group_by(soil_type) %>% 
+  summarise(meanroot = mean(root), 
+            root_sd = sd(root)) %>% 
+  ungroup() %>% 
+  left_join(imgp_tuk %>% select(soil_type, letters, lab_let) %>% distinct())
+
+rmr =ggplot(df_summary, aes(y = soil_type, x = meanroot, fill = soil_type))+
+  geom_col()+gg_soilfill+theme_minimal()+ 
+  geom_errorbar(aes(xmin = meanroot-root_sd, xmax = meanroot+root_sd), width = .25, alpha = 0.5)+
+  labs(y = "Soil type", x = "Root mass (g)")+ theme(legend.position = "none")+
+    geom_text(aes(y = soil_type, x = lab_let, label = letters), size = 5)+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))+
+  theme(axis.text.y = element_text(angle = 90, hjust = 1))
+
+anova = aov(aov(shoot~soil_type, data = imgp))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$soil_type)
+  htib = tibble(soil_type = rownames(dfx),
+                letters = dfx$Letters) 
+
+imgp_tuk = imgp %>%  left_join(htib) %>% 
+  group_by(soil_type) %>% 
+  mutate(lab_let = quantile(shoot, probs = 0.75)+IQR(shoot)*1.25)%>% 
+  ungroup() %>% 
+  mutate(st_long = fct_relevel(st_long, "Bigcone soil", "Oak soil", "Control soil"))
+
+df_summary <- imgp_tuk %>%
+  group_by(soil_type) %>% 
+  summarise(meanshoot = mean(shoot), 
+            root_sd = sd(shoot)) %>% 
+  ungroup() %>% 
+  left_join(imgp_tuk %>% select(soil_type, letters, lab_let) %>% distinct())
+
+rms =ggplot(df_summary, aes(y = soil_type, x = meanshoot, fill = soil_type))+
+  geom_col()+gg_soilfill+theme_minimal()+ 
+  geom_errorbar(aes(xmin = meanshoot-root_sd, xmax = meanshoot+root_sd), width = .25, alpha = 0.5)+
+  labs(y = "Soil type", x = "Shoot mass (g)")+ theme(legend.position = "none")+
+    geom_text(aes(y = soil_type, x = lab_let, label = letters), size = 5)+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))+
+  theme(axis.text.y = element_text(angle = 90, hjust = 1))
+
+
+anova = aov(aov(rs~soil_type, data = imgp))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$soil_type)
+  htib = tibble(soil_type = rownames(dfx),
+                letters = dfx$Letters) 
+
+imgp_tuk = imgp %>%  left_join(htib) %>% 
+  group_by(soil_type) %>% 
+  mutate(lab_let = quantile(rs, probs = 0.75)+IQR(rs)*1.25)%>% 
+  ungroup() %>% 
+  mutate(st_long = fct_relevel(st_long, "Bigcone soil", "Oak soil", "Control soil"))
+
+df_summary <- imgp_tuk %>%
+  group_by(soil_type) %>% 
+  summarise(meanrs = mean(rs), 
+            root_sd = sd(rs)) %>% 
+  ungroup() %>% 
+  left_join(imgp_tuk %>% select(soil_type, letters, lab_let) %>% distinct())
+
+rmrs =ggplot(df_summary, aes(y = soil_type, x = meanrs, fill = soil_type))+
+  geom_col()+gg_soilfill+theme_minimal()+ 
+  geom_errorbar(aes(xmin = meanrs-root_sd, xmax = meanrs+root_sd), width = .25, alpha = 0.5)+
+  labs(y = "Soil type", x = "Root:Shoot")+ theme(legend.position = "none")+
+    geom_text(aes(y = soil_type, x = lab_let, label = letters), size = 5)+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))+
+  theme(axis.text.y = element_text(angle = 90, hjust = 1))
+
+repot_bigconemass = rmr/rms/rmrs
+ggsave(plot = repot_bigconemass, width = 2, height = 8, here("figures", "repot_bigconemass_bars.png"))
+```
+
+```{r}
+repot_mass
+
+TukeyHSD(aov(below_dry~ soil_type, data = repot_mass %>% filter(seedling_sp == "Q")))
+```
+
+
+```{r}
+imgp = repot_mass %>% 
+  rename(root = below_dry)%>% 
+  rename(shoot = above_dry) %>% 
+  mutate(rs = root/shoot) %>% 
+  filter(seedling_sp == "P") %>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  )) %>%
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Control soil"
+  ))
+anova = aov(aov(root~soil_type, data = imgp))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$soil_type)
+  htib = tibble(soil_type = rownames(dfx),
+                letters = dfx$Letters) 
+
+imgp_tuk = imgp %>%  left_join(htib) %>% 
+  group_by(soil_type) %>% 
+  mutate(lab_y = quantile(log(root), probs = 0.75)+IQR(log(root))*1.75)%>% 
+  ungroup() %>% 
+  mutate(st_long = fct_relevel(st_long, "Bigcone soil", "Oak soil", "Control soil"))
+
+rmr = ggplot(imgp_tuk, aes(x = st_long, y = log(root), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root mass (g)")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 5)+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+
+anova = aov(aov(shoot~soil_type, data = imgp))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$soil_type)
+  htib = tibble(soil_type = rownames(dfx),
+                letters = dfx$Letters) 
+
+imgp_tuk = imgp %>%  left_join(htib) %>% 
+  group_by(soil_type) %>% 
+  mutate(lab_y = quantile(log(shoot), probs = 0.75)+IQR(log(shoot))*1.75)%>% 
+  ungroup() %>% 
+  mutate(st_long = fct_relevel(st_long, "Bigcone soil", "Oak soil", "Control soil"))
+
+rms = ggplot(imgp_tuk, aes(x = st_long, y = log(shoot), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Shoot mass (g)")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 5)+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+anova = aov(aov(rs~soil_type, data = imgp))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$soil_type)
+  htib = tibble(soil_type = rownames(dfx),
+                letters = dfx$Letters) 
+
+imgp_tuk = imgp %>%  left_join(htib) %>% 
+  group_by(soil_type) %>% 
+  mutate(lab_y = quantile(log(rs), probs = 0.75)+IQR(log(rs))*1.75)%>% 
+  ungroup() %>% 
+  mutate(st_long = fct_relevel(st_long, "Bigcone soil", "Oak soil", "Control soil"))
+
+rmrs = ggplot(imgp_tuk, aes(x = st_long, y = log(rs), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root:Shoot ratio")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 5)+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+
+repot_bigconemass = rmr+rms+rmrs
+ggsave(plot = repot_bigconemass, width = 9, height = 5, here("figures", "repot_bigconemass_log.png"))
+
+
+```
+
+```{r}
+imgp = repot_mass %>% 
+  rename(root = below_dry)%>% 
+  rename(shoot = above_dry) %>% 
+  mutate(rs = root/shoot) %>% 
+  filter(seedling_sp == "P") %>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  )) %>%
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Control soil"
+  ))
+anova = aov(aov(root~soil_type, data = imgp))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$soil_type)
+  htib = tibble(soil_type = rownames(dfx),
+                letters = dfx$Letters) 
+
+imgp_tuk = imgp %>%  left_join(htib) %>% 
+  group_by(soil_type) %>% 
+  mutate(lab_y = quantile((root), probs = 0.75)+IQR((root))*3)%>% 
+  ungroup() %>% 
+  mutate(st_long = fct_relevel(st_long, "Bigcone soil", "Oak soil", "Control soil"))
+
+rmr = ggplot(imgp_tuk, aes(x = st_long, y = (root), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root mass (g)")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 5)+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))+
+  scale_y_log10()
+
+
+anova = aov(aov(shoot~soil_type, data = imgp))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$soil_type)
+  htib = tibble(soil_type = rownames(dfx),
+                letters = dfx$Letters) 
+
+imgp_tuk = imgp %>%  left_join(htib) %>% 
+  group_by(soil_type) %>% 
+  mutate(lab_y = quantile((shoot), probs = 0.75)+IQR((shoot))*3)%>% 
+  ungroup() %>% 
+  mutate(st_long = fct_relevel(st_long, "Bigcone soil", "Oak soil", "Control soil"))
+
+rms = ggplot(imgp_tuk, aes(x = st_long, y = (shoot), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Shoot mass (g)")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 5)+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))+
+  scale_y_log10()
+
+anova = aov(aov(rs~soil_type, data = imgp))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$soil_type)
+  htib = tibble(soil_type = rownames(dfx),
+                letters = dfx$Letters) 
+
+imgp_tuk = imgp %>%  left_join(htib) %>% 
+  group_by(soil_type) %>% 
+  mutate(lab_y = quantile((rs), probs = 0.75)+IQR((rs))*3)%>% 
+  ungroup() %>% 
+  mutate(st_long = fct_relevel(st_long, "Bigcone soil", "Oak soil", "Control soil"))
+
+rmrs = ggplot(imgp_tuk, aes(x = st_long, y = (rs), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root:Shoot ratio")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 5)+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))+
+  scale_y_log10()
+
+
+repot_bigconemass = rmr+rms+rmrs
+ggsave(plot = repot_bigconemass, width = 9, height = 5, here("figures", "repot_bigconemass_log.png"))
+
+
+```
+
+
+##Bigcones and oaks
+
+```{r}
+imgboth = repot_mass %>% 
+  rename(root = below_dry)%>% 
+  rename(shoot = above_dry) %>% 
+  mutate(rs = root/shoot)  %>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  )) %>%
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Control soil"
+  ))
+anova = aov(aov(root~soil_type, data = imgboth %>%filter(seedling_sp=="P")))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$`soil_type`)
+  htib_p = tibble(soil_type = rownames(dfx),
+                letters = dfx$Letters,
+                seedling_sp = "P") 
+anova = aov(aov(root~soil_type, data = imgboth %>%filter(seedling_sp=="Q")))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$`soil_type`)
+  htib_q = tibble(soil_type = rownames(dfx),
+                letters = dfx$Letters,
+                seedling_sp = "Q")
+  
+htib_both = bind_rows(htib_q, htib_p)
+
+imgboth_tuk = imgboth  %>% left_join(htib_both) %>% 
+  group_by(soil_type, seedling_sp) %>% 
+  mutate(lab_y = quantile((root), probs = 0.75)+IQR((root))*3)%>% 
+  ungroup() %>% 
+  mutate(st_long = fct_relevel(st_long, "Bigcone soil", "Oak soil", "Control soil"))
+
+rboth = 
+  ggplot(imgboth_tuk, aes(x = st_long, y = (root), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root mass (g)")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 5)+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1)+no_grids)+
+  scale_y_log10()+facet_wrap(~sp_long, scales ="free", nrow = 2)
+
+rbp = 
+  ggplot(imgboth_tuk %>% filter(seedling_sp == "P"), aes(x = st_long, y = (root), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root mass (g)")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 5)+no_grids+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+rbq = 
+  ggplot(imgboth_tuk %>% filter(seedling_sp == "Q"), aes(x = st_long, y = (root), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root mass (g)")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 5)+no_grids+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+#
+
+anova = aov(aov(shoot~soil_type, data = imgboth %>%filter(seedling_sp=="P")))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$`soil_type`)
+  htib_p = tibble(soil_type = rownames(dfx),
+                letters = dfx$Letters,
+                seedling_sp = "P") 
+anova = aov(aov(shoot~soil_type, data = imgboth %>%filter(seedling_sp=="Q")))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$`soil_type`)
+  htib_q = tibble(soil_type = rownames(dfx),
+                letters = dfx$Letters,
+                seedling_sp = "Q")
+  
+htib_both = bind_rows(htib_q, htib_p)
+
+imgboth_tuk = imgboth  %>% left_join(htib_both) %>% 
+  group_by(soil_type, seedling_sp) %>% 
+  mutate(lab_y = quantile((shoot), probs = 0.75)+IQR((shoot))*3)%>% 
+  ungroup() %>% 
+  mutate(st_long = fct_relevel(st_long, "Bigcone soil", "Oak soil", "Control soil"))
+
+sboth = 
+  ggplot(imgboth_tuk, aes(x = st_long, y = (shoot), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Shoot mass (g)")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 5)+no_grids+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+sbp = 
+  ggplot(imgboth_tuk%>% filter(seedling_sp == "P"), aes(x = st_long, y = (shoot), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Shoot mass (g)")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 5)+no_grids+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+sbq = 
+  ggplot(imgboth_tuk%>% filter(seedling_sp == "Q"), aes(x = st_long, y = (shoot), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Shoot mass (g)")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 5)+no_grids+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+#
+
+anova = aov(aov(rs~soil_type, data = imgboth %>%filter(seedling_sp=="P")))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$`soil_type`)
+  htib_p = tibble(soil_type = rownames(dfx),
+                letters = dfx$Letters,
+                seedling_sp = "P") 
+anova = aov(aov(rs~soil_type, data = imgboth %>%filter(seedling_sp=="Q")))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$`soil_type`)
+  htib_q = tibble(soil_type = rownames(dfx),
+                letters = dfx$Letters,
+                seedling_sp = "Q")
+  
+htib_both = bind_rows(htib_q, htib_p)
+
+imgboth_tuk = imgboth  %>% left_join(htib_both) %>% 
+  group_by(soil_type, seedling_sp) %>% 
+  mutate(lab_y = quantile((rs), probs = 0.75)+IQR((rs))*3)%>% 
+  ungroup() %>% 
+  mutate(st_long = fct_relevel(st_long, "Bigcone soil", "Oak soil", "Control soil"))
+
+rsboth = 
+  ggplot(imgboth_tuk, aes(x = st_long, y = (rs), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root:Shoot Ratio")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 5)+no_grids+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+
+rsbp = 
+  ggplot(imgboth_tuk%>% filter(seedling_sp == "P"), aes(x = st_long, y = (rs), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root:Shoot Ratio")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 5)+no_grids+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+rsbq = 
+  ggplot(imgboth_tuk%>% filter(seedling_sp == "Q"), aes(x = st_long, y = (rs), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root:Shoot Ratio")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 5)+no_grids+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+bothmass = rboth+sboth+rsboth
+
+bothmass_grid = (rbp+sbp+rsbp)/(rbq+sbq+rsbq)
+
+bothp = (rbp+sbp+rsbp) + 
+  plot_annotation(title = 'Bigcones')
+bothq = (rbq+sbq+rsbq) + 
+  plot_annotation(title = 'Oaks')
+bothp/bothq
+# ggsave(plot = bothmass_grid, width = 9/1.25, height = 5/1.25, here("figures", "bothmass_log_big.png"))
+# ggsave(plot = bothmass_grid, width = 9, height = 5, here("figures", "bothmass_log.png"))
+
+
+library(cowplot)
+p_title <- ggdraw() + 
+  draw_label(
+    "Bigcones",
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    # add margin on the left of the drawing canvas,
+    # so title is aligned with left edge of first plot
+    plot.margin = margin(0, 0, 0, 7)
+  )
+
+q_title <- ggdraw() + 
+  draw_label(
+    "Oaks",
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    # add margin on the left of the drawing canvas,
+    # so title is aligned with left edge of first plot
+    plot.margin = margin(0, 0, 0, 7)
+  )
+
+plot_row1 <- plot_grid(rbp,sbp,rsbp, nrow = 1)
+plot_row2 <- plot_grid(rbq,sbq,rsbq, nrow = 1)
+
+bigplot = plot_grid(
+  p_title, plot_row1,q_title,plot_row2,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.2, 1,0.2,1)
+)
+
+save_plot(plot = bigplot, 
+  base_height = 5,
+  base_asp = 1.8,filename =  here("figures", "bothmass_log_cow.jpg"))
+
+save_plot(plot = bigplot, 
+  base_height = 4,
+  base_asp = 1.8,filename =  here("figures", "bothmass_log_cow_big.jpg"))
+```
+
+
+```{r}
+rboth_white = 
+  ggplot(imgboth_tuk, aes(x = st_long, y = (root), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA, col = "white")+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root mass (g)")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters, col = "white"), size =7)+
+  theme(panel.border = element_rect(colour = "white", fill=NA, size=1))+
+  scale_y_log10()+facet_wrap(~sp_long, scales ="free", nrow = 2)+white_theme+no_grids
+
+rbp_white = 
+  ggplot(imgboth_tuk %>% filter(seedling_sp == "P"), aes(x = st_long, y = (root), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA, col = "white")+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root mass (g)")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 7, col = "white")+
+  theme(panel.border = element_rect(colour = "white", fill=NA, size=1))+white_theme+no_grids
+
+rbq_white = 
+  ggplot(imgboth_tuk %>% filter(seedling_sp == "Q"), aes(x = st_long, y = (root), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA, col = "white")+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root mass (g)")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 7, col = "white")+
+  theme(panel.border = element_rect(colour = "white", fill=NA, size=1))+white_theme+no_grids
+
+
+sboth_white = 
+  ggplot(imgboth_tuk, aes(x = st_long, y = (shoot), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Shoot mass (g)")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 7, col = "white")+
+  theme(panel.border = element_rect(colour = "white", fill=NA, size=1))+white_theme+no_grids
+
+sbp_white = 
+  ggplot(imgboth_tuk%>% filter(seedling_sp == "P"), aes(x = st_long, y = (shoot), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA, col = "white")+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Shoot mass (g)")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 7, col = "white")+
+  theme(panel.border = element_rect(colour = "white", fill=NA, size=1))+white_theme+no_grids
+
+sbq_white = 
+  ggplot(imgboth_tuk%>% filter(seedling_sp == "Q"), aes(x = st_long, y = (shoot), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA, col = "white")+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Shoot mass (g)")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 7, col = "white")+
+  theme(panel.border = element_rect(colour = "white", fill=NA, size=1))+white_theme+no_grids
+
+
+
+rsboth_white = 
+  ggplot(imgboth_tuk, aes(x = st_long, y = (rs), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA, col = "white")+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root:Shoot Ratio")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 7, col = "white")+
+  theme(panel.border = element_rect(colour = "white", fill=NA, size=1))+white_theme+no_grids
+
+
+rsbp_white = 
+  ggplot(imgboth_tuk%>% filter(seedling_sp == "P"), aes(x = st_long, y = (rs), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA, col = "white")+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root:Shoot Ratio")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 7, col = "white")+
+  theme(panel.border = element_rect(colour = "white", fill=NA, size=1))+white_theme+no_grids
+
+rsbq_white = 
+  ggplot(imgboth_tuk%>% filter(seedling_sp == "Q"), aes(x = st_long, y = (rs), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA, col = "white")+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root:Shoot Ratio")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 7, col = "white")+
+  theme(panel.border = element_rect(colour = "white", fill=NA, size=1))+white_theme+no_grids
+
+bothmass_white = rboth_white+sboth_white+rsboth_white
+
+bothmass_grid_white = (rbp_white+sbp_white+rsbp_white)/(rbq_white+sbq_white+rsbq_white)
+
+bothp_white = (rbp_white+sbp_white+rsbp_white) + 
+  plot_annotation(title = 'Bigcones')
+bothq_white = (rbq_white+sbq_white+rsbq_white) + 
+  plot_annotation(title = 'Oaks')
+bothp_white/bothq_white
+# ggsave(plot = bothmass_grid, width = 9/1.25, height = 5/1.25, here("figures", "bothmass_log_big.png"))
+# ggsave(plot = bothmass_grid, width = 9, height = 5, here("figures", "bothmass_log.png"))
+
+
+p_title_white <- ggdraw() + 
+  draw_label(
+    "Bigcones",
+    x = 0,
+    hjust = 0,
+    color = "white"
+  ) +
+  theme(
+    # add margin on the left of the drawing canvas,
+    # so title is aligned with left edge of first plot
+    plot.margin = margin(0, 0, 0, 7)
+  )
+
+q_title_white <- ggdraw() + 
+  draw_label(
+    "Oaks",
+    x = 0,
+    hjust = 0,
+    color = "white"
+  ) +
+  theme(
+    # add margin on the left of the drawing canvas,
+    # so title is aligned with left edge of first plot
+    plot.margin = margin(0, 0, 0, 7)
+  )
+
+plot_row1_white <- plot_grid(rbp_white,sbp_white,rsbp_white, nrow = 1)
+plot_row2_white <- plot_grid(rbq_white,sbq_white,rsbq_white, nrow = 1)
+
+bigplot_white = plot_grid(
+  p_title_white, plot_row1_white,q_title_white,plot_row2_white,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1,0.1,1)
+)
+
+save_plot(plot = bigplot_white, 
+  base_height = 5,
+  base_asp = 1.8,filename =  here("figures", "bothmass_log_cow_white.png"))
+
+save_plot(plot = bigplot_white, 
+  base_height = 4,
+  base_asp = 1.8,filename =  here("figures", "bothmass_log_cow_big_white.png"))
+```
+
+```{r}
+rboth_white = 
+  ggplot(imgboth_tuk, aes(x = st_long, y = (root), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA, col = "white")+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root mass (g)")+ theme(legend.position = "none")+
+  theme(panel.border = element_rect(colour = "white", fill=NA, size=1))+
+  scale_y_log10()+facet_wrap(~sp_long, scales ="free", nrow = 2)+white_theme+no_grids
+
+rbp_white = 
+  ggplot(imgboth_tuk %>% filter(seedling_sp == "P"), aes(x = st_long, y = (root), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA, col = "white")+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root mass (g)")+ theme(legend.position = "none")+
+  theme(panel.border = element_rect(colour = "white", fill=NA, size=1))+white_theme+no_grids
+
+rbq_white = 
+  ggplot(imgboth_tuk %>% filter(seedling_sp == "Q"), aes(x = st_long, y = (root), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA, col = "white")+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root mass (g)")+ theme(legend.position = "none")+
+  theme(panel.border = element_rect(colour = "white", fill=NA, size=1))+white_theme+no_grids
+
+
+sboth_white = 
+  ggplot(imgboth_tuk, aes(x = st_long, y = (shoot), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Shoot mass (g)")+ theme(legend.position = "none")+
+  theme(panel.border = element_rect(colour = "white", fill=NA, size=1))+white_theme+no_grids
+
+sbp_white = 
+  ggplot(imgboth_tuk%>% filter(seedling_sp == "P"), aes(x = st_long, y = (shoot), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA, col = "white")+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Shoot mass (g)")+ theme(legend.position = "none")+
+  theme(panel.border = element_rect(colour = "white", fill=NA, size=1))+white_theme+no_grids
+
+sbq_white = 
+  ggplot(imgboth_tuk%>% filter(seedling_sp == "Q"), aes(x = st_long, y = (shoot), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA, col = "white")+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Shoot mass (g)")+ theme(legend.position = "none")+
+  theme(panel.border = element_rect(colour = "white", fill=NA, size=1))+white_theme+no_grids
+
+
+
+rsboth_white = 
+  ggplot(imgboth_tuk, aes(x = st_long, y = (rs), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA, col = "white")+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root:Shoot Ratio")+ theme(legend.position = "none")+
+  theme(panel.border = element_rect(colour = "white", fill=NA, size=1))+white_theme+no_grids
+
+
+rsbp_white = 
+  ggplot(imgboth_tuk%>% filter(seedling_sp == "P"), aes(x = st_long, y = (rs), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA, col = "white")+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root:Shoot Ratio")+ theme(legend.position = "none")+
+  theme(panel.border = element_rect(colour = "white", fill=NA, size=1))+white_theme+no_grids
+
+rsbq_white = 
+  ggplot(imgboth_tuk%>% filter(seedling_sp == "Q"), aes(x = st_long, y = (rs), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA, col = "white")+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root:Shoot Ratio")+ theme(legend.position = "none")+
+  theme(panel.border = element_rect(colour = "white", fill=NA, size=1))+white_theme+no_grids
+
+bothmass_white = rboth_white+sboth_white+rsboth_white
+
+bothmass_grid_white = (rbp_white+sbp_white+rsbp_white)/(rbq_white+sbq_white+rsbq_white)
+
+bothp_white = (rbp_white+sbp_white+rsbp_white) + 
+  plot_annotation(title = 'Bigcones')
+bothq_white = (rbq_white+sbq_white+rsbq_white) + 
+  plot_annotation(title = 'Oaks')
+bothp_white/bothq_white
+# ggsave(plot = bothmass_grid, width = 9/1.25, height = 5/1.25, here("figures", "bothmass_log_big.png"))
+# ggsave(plot = bothmass_grid, width = 9, height = 5, here("figures", "bothmass_log.png"))
+
+
+p_title_white <- ggdraw() + 
+  draw_label(
+    "Bigcones",
+    x = 0,
+    hjust = 0,
+    color = "white"
+  ) +
+  theme(
+    # add margin on the left of the drawing canvas,
+    # so title is aligned with left edge of first plot
+    plot.margin = margin(0, 0, 0, 7)
+  )
+
+q_title_white <- ggdraw() + 
+  draw_label(
+    "Oaks",
+    x = 0,
+    hjust = 0,
+    color = "white"
+  ) +
+  theme(
+    # add margin on the left of the drawing canvas,
+    # so title is aligned with left edge of first plot
+    plot.margin = margin(0, 0, 0, 7)
+  )
+
+plot_row1_white <- plot_grid(rbp_white,sbp_white,rsbp_white, nrow = 1)
+plot_row2_white <- plot_grid(rbq_white,sbq_white,rsbq_white, nrow = 1)
+
+bigplot_white = plot_grid(
+  p_title_white, plot_row1_white,q_title_white,plot_row2_white,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1,0.1,1)
+)
+
+save_plot(plot = bigplot_white, 
+  base_height = 5,
+  base_asp = 1.8,filename =  here("figures", "bothmass_log_cow_white.png"))
+
+save_plot(plot = bigplot_white, 
+  base_height = 4,
+  base_asp = 1.8,filename =  here("figures", "bothmass_log_cow_big_white.png"))
+```
+
+```{r}
+anova = aov(aov(shoot~soil_type, data = imgp))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$soil_type)
+  htib = tibble(soil_type = rownames(dfx),
+                letters = dfx$Letters) 
+
+imgp_tuk = imgp %>%  left_join(htib) %>% 
+  group_by(soil_type) %>% 
+  mutate(lab_y = quantile((shoot), probs = 0.75)+IQR((shoot))*3)%>% 
+  ungroup() %>% 
+  mutate(st_long = fct_relevel(st_long, "Bigcone soil", "Oak soil", "Control soil"))
+
+rms = ggplot(imgp_tuk, aes(x = st_long, y = (shoot), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Shoot mass (g)")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 5)+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+anova = aov(aov(rs~soil_type, data = imgp))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$soil_type)
+  htib = tibble(soil_type = rownames(dfx),
+                letters = dfx$Letters) 
+
+imgp_tuk = imgp %>%  left_join(htib) %>% 
+  group_by(soil_type) %>% 
+  mutate(lab_y = quantile((rs), probs = 0.75)+IQR((rs))*3)%>% 
+  ungroup() %>% 
+  mutate(st_long = fct_relevel(st_long, "Bigcone soil", "Oak soil", "Control soil"))
+
+rmrs = ggplot(imgp_tuk, aes(x = st_long, y = (rs), fill = soil_type))+
+  geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root:Shoot ratio")+ theme(legend.position = "none")+
+    geom_text(aes(x = st_long, y = lab_y, label = letters), size = 5)+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+
+repot_bigconemass = rmr+rms+rmrs
+ggsave(plot = repot_bigconemass, width = 9, height = 5, here("figures", "repot_bigconemass_log.png"))
+
+
+```
+
+
+
+
+Shoot size
+```{r}
+TukeyHSD(aov(lm(shoot~soil_type, data = img%>% 
+         filter(rs_ratio <40) %>% 
+           filter(seedling_sp == "P"))))
+
+TukeyHSD(aov(lm(shoot~soil_type, data = img%>% 
+         filter(rs_ratio <40) %>% 
+           filter(seedling_sp == "Q"))))
+
+
+ggplot(img, aes(x = sp_long, y = shoot, fill = soil_type))+
+  geom_boxplot(alpha = 0.75)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Seedling Species", y = "Shoot area (cm2)")
+
+ggplot(img, aes(x = sp_long, y = shoot, fill = soil_type))+
+  geom_boxplot(alpha = 0.75)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Seedling Species", y = "Shoot area (cm2)")+
+  facet_wrap(~sp_long, scales = "free")
+
+shoot_plot = ggplot(img, aes(x = sp_long, y = shoot, fill = soil_type))+ 
+  geom_point(aes(color = soil_type), alpha = 0.15, position = position_jitterdodge(jitter.width = .1))+ gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Seedling Species", y = "Shoot area (cm2)")+theme(legend.position = 'none')+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+```
+
+Root size
+```{r}
+TukeyHSD(aov(lm(root~soil_type, data = img %>% 
+           filter(seedling_sp == "P"))))
+
+TukeyHSD(aov(lm(root~soil_type, data = img%>% 
+         filter(rs_ratio <40) %>% 
+           filter(seedling_sp == "Q"))))
+
+
+ggplot(img, aes(x = sp_long, y = root, fill = soil_type))+
+  geom_boxplot(alpha = 0.75)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Seedling Species", y = "Root area (cm2)")
+
+ggplot(img, aes(x = sp_long, y = root, fill = soil_type))+
+  geom_boxplot(alpha = 0.75)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Seedling Species", y = "Root area (cm2)")+
+  facet_wrap(~sp_long, scales = "free")
+
+root_plot = ggplot(img, aes(x = sp_long, y = root, fill = soil_type))+ 
+  geom_point(aes(color = soil_type), alpha = 0.15, position = position_jitterdodge(jitter.width = .1))+ gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "", y = "Root area (cm2)")+theme(legend.position = 'none')+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+ggplot(img, aes(x = sp_long, y = root, fill = soil_type, group = sp_st))+ 
+  geom_point(aes(color = soil_type), alpha = 0.15, position = position_jitterdodge(jitter.width = .1))+ gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+
+  labs(x = "", y = "Root area (cm2)")+theme(legend.position = 'none')+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+```
+
+
+```{r}
+repot_sizeplot = root_plot+shoot_plot+rs_plot
+
+ggsave(plot = repot_sizeplot, width = 12, height = 5, here("figures", "repot_sizeplot.png"))
+```
+
+remaking the above figure with seedling masses
+
+```{r}
+dfmass = repot_mass %>% 
+  left_join(trt) %>% 
+  mutate(soil_type = fct_relevel(soil_type, "P", "Q", "C")) %>% 
+  mutate(rs = below_dry/above_dry)%>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  ))
+
+root_plotmass = ggplot(dfmass, aes(x = sp_long, y = below_dry, fill = soil_type))+ 
+  geom_point(aes(color = soil_type), alpha = 0.15, position = position_jitterdodge(jitter.width = .1))+ gg_soilcolor+facet_wrap(~sp_long, scales = "free")+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "", y = "Root mass (g)")+theme(
+  strip.background = element_blank(),
+  strip.text.x = element_blank())+theme(legend.position = 'none')+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+shoot_plotmass = ggplot(dfmass, aes(x = sp_long, y = above_dry, fill = soil_type))+ 
+  geom_point(aes(color = soil_type), alpha = 0.15, position = position_jitterdodge(jitter.width = .1))+ gg_soilcolor+facet_wrap(~sp_long, scales = "free")+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "", y = "Shoot mass (g)")+theme(
+  strip.background = element_blank(),
+  strip.text.x = element_blank())+theme(legend.position = 'none')+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+rs_plotmass = ggplot(dfmass %>% filter(rs<10), aes(x = sp_long, y = rs, fill = soil_type))+ 
+  geom_point(aes(color = soil_type), alpha = 0.15, position = position_jitterdodge(jitter.width = .1))+ gg_soilcolor+facet_wrap(~sp_long, scales = "free")+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "", y = "Root:Shoot Ratio")+ theme(
+  strip.background = element_blank(),
+  strip.text.x = element_blank())+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+total_plotmass = ggplot(dfmass %>% filter(rs<10), aes(x = sp_long, y = above_dry+below_dry, fill = soil_type))+ 
+  geom_point(aes(color = soil_type), alpha = 0.15, position = position_jitterdodge(jitter.width = .1))+ gg_soilcolor+facet_wrap(~sp_long, scales = "free")+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "", y = "Total mass(g)")+ theme(
+  strip.background = element_blank(),
+  strip.text.x = element_blank())+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+repot_sizeplot_mass = root_plotmass+shoot_plotmass+rs_plotmass
+
+ggsave(plot = repot_sizeplot_mass, width = 12, height = 5, here("figures", "repot_massplot.png"))
+
+TukeyHSD(aov(below_dry/above_dry~soil_type, data = dfmass %>%  filter(seedling_sp == "Q")))
+```
+
+###################
+Colonization
+
+```{r}
+TukeyHSD(aov(lm(repot_col~soil_type, data = colonization %>% 
+           filter(seedling_sp == "P"))))
+
+TukeyHSD(aov(lm(repot_col~soil_type, data = colonization %>% 
+           filter(seedling_sp == "Q"))))
+
+
+ggplot(colonization, aes(x = sp_long, y = repot_col, fill = soil_type))+
+  geom_boxplot(alpha = 0.75)+gg_soilfill+ gg_soilcolor+
+  geom_point(aes(color = soil_type), alpha = 0.15, position = position_jitterdodge(jitter.width = .1))+
+  theme_minimal()+ 
+  labs(x = "Seedling Species", y = "Percent colonization")
+```
+
+```{r}
+colsize = colonization %>% 
+  left_join(img) %>% 
+  filter(repot_col >0) %>% 
+  filter(soil_type != "C")%>% 
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Control soil"
+  ))%>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  )) %>% 
+  left_join(repot_comm %>% select(seedling_id, richness))
+
+
+ggplot(colsize %>% 
+         filter(rs_ratio<40), aes(x = repot_col, y = rs_ratio, color = soil_type))+
+  geom_point()+ gg_soilcolor+theme_minimal()+facet_wrap(~seedling_sp)+geom_smooth(method = "lm")
+
+ggplot(colsize %>% 
+         filter(rs_ratio<40), aes(x = repot_col, y = total, color = soil_type))+
+  geom_point()+ gg_soilcolor+theme_minimal()+facet_wrap(~sp_long, scales = "free")+geom_smooth(method = "lm")+
+  labs(x = "Percent colonization", y = "Total seedling area (cm2)")
+
+
+ggplot(colsize %>% 
+         filter(rs_ratio<40), aes(x = repot_col, y = total, color = soil_type))+
+  geom_point()+ gg_soilcolor+theme_minimal()+facet_wrap(~sp_long, scales = "free")+
+  labs(x = "Percent colonization", y = "Total seedling area (cm2)")
+
+pmod = lm(total~repot_col*soil_type, data = colsize %>% filter(seedling_sp == "P"))
+summary(pmod)
+# presid = resid(pmod)
+# plot(fitted(pmod), presid, xlab = "Fitted Values", ylab = "Residuals", main = "Residuals vs Fitted Values")
+# abline(h = 0, col = "red")  # Add a horizontal line at 0
+
+qmod = lm(total~repot_col*soil_type, data = colsize %>% filter(seedling_sp == "Q"))
+summary(qmod)
+# qresid = resid(qmod)
+# plot(fitted(qmod), qresid, xlab = "Fitted Values", ylab = "Residuals", main = "Residuals vs Fitted Values")
+# abline(h = 0, col = "red") 
+
+ggplot(colsize %>% filter(seedling_sp == "P")
+       , aes(sample = total)) + 
+  stat_qq() + 
+  stat_qq_line() +  # Adds a reference line
+  ggtitle("Q-Q Plot") + 
+  theme_minimal() 
+
+ggplot(colsize %>% filter(seedling_sp == "Q")
+       , aes(sample = total)) + 
+  stat_qq() + 
+  stat_qq_line() +  # Adds a reference line
+  ggtitle("Q-Q Plot") + 
+  theme_minimal() 
+
+```
+
+
+```{r}
+ggplot(colsize, aes(x = repot_col, y = shoot, color = soil_type))+
+  geom_point()+ gg_soilcolor+theme_minimal()+facet_wrap(~sp_long, scales = "free")+geom_smooth(method = "lm")+
+  labs(x = "Percent colonization", y = "Shoot area (cm2)")
+
+ggplot(colsize, aes(x = repot_col, y = shoot, color = soil_type))+
+  geom_point()+ gg_soilcolor+theme_minimal()+facet_wrap(~sp_long, scales = "free")+
+  labs(x = "Percent colonization", y = "Shoot area (cm2)")+geom_smooth(method = "lm", se = F)
+ggplot(colsize, aes(x = repot_col, y = root, color = soil_type))+
+  geom_point()+ gg_soilcolor+theme_minimal()+facet_wrap(~sp_long, scales = "free")+
+  labs(x = "Percent colonization", y = "Root area (cm2)")+geom_smooth(method = "lm", se = F)
+ggplot(colsize %>% 
+         filter(rs_ratio<80), aes(x = repot_col, y = rs_ratio, color = soil_type))+
+  geom_point()+ gg_soilcolor+theme_minimal()+facet_wrap(~sp_long, scales = "free")+
+  labs(x = "Percent colonization", y = "Root to shoot ratio")+geom_smooth(method = "lm", se = F)
+
+summary(lm(shoot~repot_col*soil_type, data = colsize %>% filter(seedling_sp == "P")))
+summary(lm(shoot~repot_col*soil_type, data = colsize %>% filter(seedling_sp == "Q")))
+
+summary(lm(root~repot_col*soil_type, data = colsize %>% filter(seedling_sp == "P")))
+summary(lm(root~repot_col*soil_type, data = colsize %>% filter(seedling_sp == "Q")))
+
+summary(lm(rs_ratio~repot_col*soil_type, data = colsize %>% filter(seedling_sp == "P")%>% 
+         filter(rs_ratio<80)))
+summary(lm(rs_ratio~repot_col*soil_type, data = colsize %>% filter(seedling_sp == "Q")%>% 
+         filter(rs_ratio<80)))
+```
+
+
+For oaks, is leaf count predicted by colonization rate? Turns out not significantly.
+```{r}
+leaf_df = colsize %>% 
+  left_join(measure %>% 
+  filter(date == "2021-03-01") %>% 
+  select(seedling_id, leaf_count))
+
+ggplot(leaf_df, aes(x = repot_col, y = leaf_count, color = soil_type))+
+  geom_point()+geom_smooth(method = "lm", se = F)+gg_soilcolor
+
+summary(lm(leaf_count~repot_col*soil_type, data = leaf_df %>% filter(seedling_sp == "Q")))
+
+ggplot(leaf_df, aes(x = total, y = leaf_count, color = soil_type))+
+  geom_point()+geom_smooth(method = "lm", se = F)+gg_soilcolor
+
+ggplot(leaf_df, aes(x = sqrt(repot_col), y = root/leaf_count))+
+  geom_point(aes( color = soil_type))+geom_smooth(method = "lm", se = F, col = "darkgray")+gg_soilcolor+
+  labs(x = "Sqrt of percent colonization", y = "Root area per leaf", title = "Oak root production trade-off? ")
+
+summary(lm((root/leaf_count)~sqrt(repot_col), data = leaf_df %>% filter(seedling_sp == "Q")))
+summary(lm(rs_ratio~sqrt(repot_col), data = leaf_df %>% filter(seedling_sp == "Q")))
+
+summary(lm(rs_ratio~sqrt(repot_col)*soil_type, data = leaf_df %>% filter(seedling_sp == "Q")))
+
+```
+
+
+```{r}
+ggplot(colsize %>% 
+         filter(seedling_sp == "Q") %>% 
+         filter(!is.na(richness)), aes(x = repot_col, y = shoot, color = as.factor(richness), shape = soil_type))+
+  geom_point()+theme_minimal()+geom_smooth(method = "lm", se=F)+
+  labs(x = "Percent colonization", y = "Shoot area (cm2)")
+
+ggplot(colsize %>% 
+         filter(seedling_sp == "Q") %>% 
+         filter(!is.na(richness)), aes(x = repot_col, y = root, color = as.factor(richness), shape = soil_type))+
+  geom_point()+theme_minimal()+geom_smooth(method = "lm", se=F)+
+  labs(x = "Percent colonization", y = "Root area (cm2)")
+
+ggplot(colsize %>% 
+         filter(seedling_sp == "Q") %>% 
+         filter(!is.na(richness)), aes(x = repot_col, y = rs_ratio, color = as.factor(richness), shape = soil_type))+
+  geom_point()+theme_minimal()+geom_smooth(method = "lm", se=F)+
+  labs(x = "Percent colonization", y = "Root to shoot ratio")
+
+ggplot(colsize %>% 
+         filter(seedling_sp == "Q") %>% 
+         filter(!is.na(richness)) %>% 
+         filter(soil_type == "Q"), aes(x = repot_col, y = rs_ratio, color = as.factor(richness), shape = soil_type))+
+  geom_point()+theme_minimal()+geom_smooth(method = "lm", se=F)+
+  labs(x = "Percent colonization", y = "Root to shoot ratio")
+
+summary(lm(rs_ratio~repot_col+richness, data = colsize %>% 
+         filter(seedling_sp == "Q") %>% 
+         filter(!is.na(richness)) %>% 
+         filter(soil_type == "Q")))
+```
+
+
+
+```{r}
+ggplot(colsize, aes(x = repot_col, y = root, color = soil_type))+
+  geom_point()+ gg_soilcolor+theme_minimal()+facet_wrap(~sp_long, scales = "free")+geom_smooth(method = "lm")+
+  labs(x = "Percent colonization", y = "Total seedling area (cm2)")
+
+
+summary(lm(root~repot_col*soil_type, data = colsize %>% filter(seedling_sp == "P")))
+summary(lm(root~repot_col*soil_type, data = colsize %>% filter(seedling_sp == "Q")))
+```
+
+
+```{r}
+
+
+tip_comms = repot_comm %>% 
+  left_join(trt) %>% 
+  pivot_longer(cols = 2:7, names_to = "taxon", values_to = "pct_col")%>% 
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Control soil"
+  ))
+
+ggplot(tip_comms, aes(x = as.factor(seedling_id), y = pct_col, fill = taxon))+
+  geom_bar(stat = "identity")+facet_grid(rows = vars(seedling_sp), cols = vars(soil_type), scales = "free")
+
+ggplot(tip_comms %>% 
+         filter(seedling_sp == "P"), 
+       aes(x = as.factor(seedling_id), y = pct_col, fill = taxon))+
+  geom_bar(stat = "identity")+facet_grid(rows = vars(seedling_sp), cols = vars(st_long), scales = "free")+
+  labs(title = "Bigcones", x = "Seedling", y = "Percent colonization")+theme_minimal()
+
+ggplot(tip_comms %>% 
+         filter(seedling_sp == "Q"), 
+       aes(x = as.factor(seedling_id), y = pct_col, fill = taxon))+
+  geom_bar(stat = "identity")+facet_grid(rows = vars(seedling_sp), cols = vars(st_long), scales = "free")+
+  labs(title = "Oaks", x = "Seedling", y = "Percent colonization")+theme_minimal()
+
+tipsum = tip_comms %>% 
+  group_by(seedling_sp, soil_type, taxon) %>% 
+  summarize(pct = mean(pct_col)) %>% 
+  mutate(Taxon = case_when(
+    taxon == "cenococcum_sp" ~"Cenococcum sp.",
+    taxon == "peziza_sp" ~"Peziza sp.",
+    taxon == "pustularia_sp" ~"Pustularia sp.",
+    taxon == "rhizopogon_hawkerae" ~"Rhizopogon hawkerae",
+    taxon == "suillus_lakei" ~"Suillus lakei",
+    taxon == "tuber_candidum" ~"Tuber candidum"
+  ))%>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  ))%>% 
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Control soil"
+  ))
+
+ggplot(tipsum, aes(x = st_long, y = pct, fill = Taxon))+
+  geom_bar(stat = "identity")+facet_wrap(~sp_long)+theme_minimal()+
+  labs(x = "Soil type", y = "Average percent colonization")+
+  scale_fill_viridis(discrete = TRUE) #, option="turbo"
+
+ggplot(tipsum, aes(x = st_long, y = pct, fill = Taxon))+
+  geom_bar(stat = "identity")+facet_wrap(~sp_long)+theme_minimal()+
+  labs(x = "Soil type", y = "Average percent colonization")+ scale_fill_brewer(palette = "Set2")
+```
+
+## How were the seedlings looking just before repotting? 
+Chlorosis / leaf count
+
+```{r}
+df1 = measure %>% 
+  filter(date == "2021-03-01")%>% 
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Control soil"
+  ))
+
+dfp = df1 %>% 
+  filter(seedling_sp=="P")
+dfq = df1 %>% 
+  filter(seedling_sp=="Q")
+
+ggplot(dfp, aes(x = seedling_sp, y = chlorosis, fill = soil_type))+
+  geom_boxplot(alpha = 0.8)+gg_soilfill+theme_minimal()+labs(x = "", y = "Chlorosis")
+TukeyHSD(aov(lm(chlorosis~ soil_type, data = dfp)))
+
+ggplot(dfq, aes(x = seedling_sp, y = leaf_count, fill = soil_type))+
+  geom_boxplot(alpha = 0.8)+gg_soilfill+theme_minimal()+labs(x = "", y = "Leaf count")
+TukeyHSD(aov(lm(leaf_count~ soil_type, data = dfq)))
+
+ggplot(df1, aes(x = soil_type, y = height_cm, fill = soil_type))+facet_wrap(~seedling_sp, scales = "free")+
+  geom_boxplot(alpha = 0.8)+gg_soilfill+theme_minimal()+labs(x = "", y = "Seedling height at repotting (cm)")
+```
+
+
+
+```{r}
+df2 = measure %>% 
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Control soil"
+  ))%>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  ))
+
+ggplot(df2, aes(x=date, y= height_cm, group = seedling_id, color = soil_type))+
+  geom_point(position =position_jitterdodge())+geom_line(alpha = 0.1)+gg_soilcolor+
+  facet_wrap(~sp_long, scales = "free")+theme_minimal()+
+  labs(x = "Date", y = "Seedling height (cm)")
+
+```
+
+```{r}
+library(lubridate)
+df3 = measure %>% 
+  select(1:7)%>%
+  left_join(total_treat) %>% 
+  mutate(date = ymd(date)) %>% 
+  filter(date > "2021-03-01" & date <"2022-05-01")%>% 
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Control soil"
+  ))%>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  )) %>% 
+  filter(soil_type == "C") %>% 
+  filter(seedling_sp == "P")
+
+ggplot(df3, aes(x=date, y= height_cm, group = seedling_id, color = neighb_st))+
+  geom_point()+geom_line(alpha = 0.25)+gg_nsoilcolor+theme_minimal()+
+  labs(x = "Date", y = "Seedling height (cm)")
+
+df4 = df3 %>% 
+  mutate(month = month(date)) %>% 
+  filter(month == 4)
+
+
+
+ggplot(df4, aes(x=as.factor(date), y= height_cm, fill = neighb_st))+gg_nsoilcolor+gg_nsoilfill+theme_minimal()+
+  geom_point(aes(color = neighb_st),position = position_jitterdodge(jitter.width = 0.1), alpha = 0.75)+
+  geom_boxplot(alpha = 0.8)+
+  labs(x = "Date", y = "Seedling height (cm)")
+
+df5 = df4 %>%
+  select(seedling_id, date, height_cm) %>% 
+  pivot_wider(names_from = date, values_from = height_cm) %>% 
+  left_join(total_treat) %>% 
+  rename(yr1 = 3, yr2 = 2) %>% 
+  mutate(growth = yr2/yr1)%>% 
+  mutate(soil_type = fct_relevel(soil_type, "P", "Q", "C"))%>% 
+  mutate(neighb_st = fct_relevel(neighb_st, "P", "Q", "C"))%>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  ))
+
+ggplot(df5 %>% filter(growth<8), aes(x=neighb_st, y= growth, fill = neighb_st))+gg_nsoilcolor+gg_nsoilfill+theme_minimal()+
+  geom_point(aes(color = neighb_st),position = position_jitterdodge(jitter.width = 0.25), alpha = 0.75)+
+  geom_boxplot(alpha = 0.8)+
+  labs(x = "Date", y = "Growth (t2/t1)")+facet_wrap(~sp_long)
+
+TukeyHSD(aov(growth~neighb_st, data = df5))
+```
+
+```{r}
+library(lubridate)
+df3 = measure %>% 
+  select(1:7)%>%
+  left_join(total_treat) %>% 
+  mutate(date = ymd(date)) %>% 
+  filter(date > "2021-03-01" & date <"2022-05-01")%>% 
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Control soil"
+  ))%>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  )) %>% 
+  filter(soil_type == "C") %>% 
+  filter(seedling_sp == "Q")
+
+ggplot(df3, aes(x=date, y= height_cm, group = seedling_id, color = neighb_st))+
+  geom_point()+geom_line(alpha = 0.25)+gg_nsoilcolor+theme_minimal()+
+  labs(x = "Date", y = "Seedling height (cm)")
+
+df4 = df3 %>% 
+  mutate(month = month(date)) %>% 
+  filter(month == 4)
+
+
+
+ggplot(df4, aes(x=as.factor(date), y= height_cm, fill = neighb_st))+gg_nsoilcolor+gg_nsoilfill+theme_minimal()+
+  geom_point(aes(color = neighb_st),position = position_jitterdodge(jitter.width = 0.1), alpha = 0.75)+
+  geom_boxplot(alpha = 0.8)+
+  labs(x = "Date", y = "Seedling height (cm)")
+
+df5 = df4 %>%
+  select(seedling_id, date, leaf_count) %>% 
+  pivot_wider(names_from = date, values_from = leaf_count) %>% 
+  left_join(total_treat) %>% 
+  rename(yr1 = 3, yr2 = 2) %>% 
+  mutate(growth = yr2/yr1)%>% 
+  mutate(soil_type = fct_relevel(soil_type, "P", "Q", "C"))%>% 
+  mutate(neighb_st = fct_relevel(neighb_st, "P", "Q", "C"))%>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  ))
+
+ggplot(df5 %>% filter(growth<8), aes(x=neighb_st, y= growth, fill = neighb_st))+gg_nsoilcolor+gg_nsoilfill+theme_minimal()+
+  geom_point(aes(color = neighb_st),position = position_jitterdodge(jitter.width = 0.25), alpha = 0.75)+
+  geom_boxplot(alpha = 0.8)+
+  labs(x = "Date", y = "Leaf count (t2/t1)")+facet_wrap(~sp_long)
+
+TukeyHSD(aov(growth~neighb_st, data = df5))
+```

@@ -50,7 +50,9 @@ hold = img %>%
 
 img_wide = img %>% 
   mutate(area = as.numeric(area)) %>% 
-  pivot_wider(names_from = plant_compartment, values_from = area,values_fill = list(Value = 0)) %>% 
+  drop_na()  %>% 
+  pivot_wider(names_from = plant_compartment, values_from = area,values_fill = list(Value = 0))%>% 
+  unnest(4:10) %>% 
   mutate_at(c("predawn_foliar","predawn_stem", "midday_foliar", "midday_stem", "foliar", "aboveground", "belowground"), ~replace_na(.,0))%>% 
   mutate(aboveground = as.numeric(aboveground))%>% 
   mutate(belowground = as.numeric(belowground))%>% 
@@ -70,10 +72,6 @@ ggplot(img_wide, aes(x = soil_type, y = ab_ratio, fill = soil_type))+
   facet_grid(cols = vars(seedling_sp))+
   lims(y = c(0,1))
 
-ggplot(img_wide, aes(x = soil_type, y = ab_ratio, fill = soil_type))+
-  geom_boxplot()+
-  facet_grid(cols = vars(seedling_sp))+
-  lims(y = c(0,1))
 ggplot(img_wide, aes(x = soil_type, y = all_above+belowground, fill = soil_type))+
   geom_boxplot()+
   facet_grid(cols = vars(seedling_sp))

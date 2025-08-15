@@ -19,18 +19,18 @@ library(RColorBrewer)
 
 ```{r}
 #just before repotting
-seedling_size = read_csv(here("data", "ghecto_repotting_seedling_data.csv")) %>% 
+seedling_size = read_csv(here("data", "repotting", "ghecto_repotting_seedling_data.csv")) %>% 
   mutate(timepoint = "3")
-t3 = read_csv(here("data", "ghecto_repotting_seedling_data.csv")) %>% 
+t3 = read_csv(here("data", "repotting", "ghecto_repotting_seedling_data.csv")) %>% 
   mutate(timepoint = "3")%>% 
   mutate(month = lubridate::my(032021))
 
-colonization = read_csv(here("data", "ghecto_repotting_root_pulling_data.csv")) %>% 
+colonization = read_csv(here("data","repotting", "ghecto_repotting_root_pulling_data.csv")) %>% 
   dplyr::select(1:3) %>% 
   mutate(pct_col = colonization_numerator/colonization_denominator)
 
 #from the grow up in year 1 before repotting
-seedlings = read_csv(here("data", "seedling_measurements.csv")) %>%
+seedlings = read_csv(here("data", "seedling_measurements", "seedling_measurements.csv")) %>%
   clean_names()
 
 seedlings = seedlings[(match(unique(seedlings$seedling_id), seedlings$seedling_id)),]%>% 
@@ -44,29 +44,29 @@ post_repotting = read_csv(here("data", "post_repotting_measurements.csv")) %>%
 t4 = post_repotting %>% 
   mutate(month = lubridate::my(042021))
 
-t5 = read_csv(here("data", "seedling_data_timepoint5.csv")) %>%
+t5 = read_csv(here("data", "seedling_measurements", "seedling_data_timepoint5.csv")) %>%
   clean_names() %>% 
   mutate(timepoint = "5")%>% 
   mutate(month = lubridate::my(122021))
 
-t6 = read_csv(here("data", "seedling_measurements_winter22.csv")) %>%
+t6 = read_csv(here("data", "seedling_measurements", "seedling_measurements_winter22.csv")) %>%
   clean_names() %>% 
   mutate(timepoint = "6")%>% 
   mutate(month = lubridate::my(022022))
 
-t7 = read_csv(here("data", "measurements_april2022.csv")) %>% 
+t7 = read_csv(here("data","seedling_measurements", "measurements_april2022.csv")) %>% 
   clean_names() %>% 
   rename(additional_height = add_height)%>% 
   mutate(timepoint = "7")%>% 
   mutate(month = lubridate::my(042022))
 
-t8 = read_csv(here("data", "Neighbor seedlings measurements july.csv")) %>% 
+t8 = read_csv(here("data", "seedling_measurements", "measurements_jul2022.csv")) %>% 
   clean_names() %>% 
   mutate(timepoint = "8")%>% 
   mutate(month = lubridate::my(082022))
 
 #which seedling was paired with which other seedling? they share a pot number 
-potting = read_csv(here("data", "ghecto_neighbor_pairs.csv")) %>% 
+potting = read_csv(here("data", "design", "ghecto_neighbor_pairs.csv")) %>% 
   clean_names()
 
 seedling_sizes = t3 %>% 
@@ -160,7 +160,7 @@ photo_data = photo_data  %>%
   filter(seedling_id!=4282)  %>% 
   left_join(colonization)
 
-harvested = read_csv(here("data", "ghecto_repotting_dry_biomass.csv")) %>% 
+harvested = read_csv(here("data", "repotting", "ghecto_repotting_dry_biomass.csv")) %>% 
   mutate(mass = bag_with_seedling_g - just_bag_g) %>% 
   mutate(above_below = case_when(
   above_below == "A" ~ "above_dry", 
@@ -333,7 +333,7 @@ ggsave(here("figures", "bigcone_rootshoot_tocol.pdf"))
 photo_data = photo_data %>%
   mutate(total_area = above_area_cm2+underground_area_cm2)
 
-dest_mass = read_csv(here("data", "ghecto_repotting_dry_biomass.csv")) %>% 
+dest_mass = read_csv(here("data", "repotting", "ghecto_repotting_dry_biomass.csv")) %>% 
   mutate(mass = bag_with_seedling_g + just_bag_g) %>% 
   mutate(above_below = 
            case_when(

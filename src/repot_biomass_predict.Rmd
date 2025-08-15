@@ -1,0 +1,195 @@
+---
+title: "Comparing biomass"
+author: "Gabe Runte"
+date: "2024-02-14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(here)
+library(janitor)
+library(tidyverse)
+
+source(here("src", "colors.R"))
+```
+
+## Read in files
+```{r, message = F}
+repot_scan = read_csv(here("data/repotting", "seedling_scan_data.csv")) %>% 
+  select(-seedling_sp, -notes, -height_cm)
+trt = read_csv(here("data", "design", "seedling_treatments.csv"))
+wet = read_csv(here("data", "repotting", "ghecto_repotting_destruction.csv")) %>% 
+  mutate(correction = wet_below_g/(wet_below_g - wet_tips_g))
+dry = read_csv(here("data", "repotting", "ghecto_repotting_dry_biomass.csv")) %>% 
+  mutate(seedling_g = bag_with_seedling_g - just_bag_g)
+
+```
+
+
+
+```{r}
+drywide = dry %>% 
+  mutate(compartment = case_when(
+    above_below == "A"~ "above_dry",
+    above_below == "B"~ "below_dry"
+  )) %>% 
+  select(seedling_id, compartment, seedling_g) %>% 
+  pivot_wider(names_from = compartment, values_from = seedling_g)
+
+repot_mass = wet %>% 
+  select(seedling_id, wet_above_g, wet_below_g) %>% 
+  left_join(drywide ) %>% 
+  left_join(trt) %>% 
+  left_join(repot_scan) %>% 
+  mutate(adry_sq = sqrt(above_dry))%>% 
+  mutate(bdry_sq = sqrt(below_dry))
+
+summary(lm(above_dry ~ above_area_cm2*seedling_sp*soil_type, data =repot_mass))
+
+AIC(lm(above_dry ~ above_area_cm2*seedling_sp, data =repot_mass))
+AIC(lm(sqrt(above_dry) ~ above_area_cm2*seedling_sp, data =repot_mass))
+summary(lm(adry_sq ~ above_area_cm2*seedling_sp, data =repot_mass))
+
+abovemodel = lm(adry_sq ~ above_area_cm2*seedling_sp, data =repot_mass)
+belowmodel = lm(bdry_sq ~ underground_area_cm2*seedling_sp*soil_type, data =repot_mass)
+
+summary(abovemodel)
+summary(belowmodel)
+
+
+predict_below_df = repot_scan  %>% 
+  select(seedling_id, underground_area_cm2)%>% 
+  left_join(trt) %>% 
+  filter(! seedling_id %in% repot_mass$seedling_id)
+
+predict_below_mass = predict(belowmodel, predict_below_df)
+predict_below_out = predict_below_df %>% 
+  mutate(below_dry = predict_below_mass^2)
+
+predict_above_df = repot_scan  %>% 
+  select(seedling_id, above_area_cm2)%>% 
+  left_join(trt) %>% 
+  filter(! seedling_id %in% repot_mass$seedling_id)
+
+predict_above_mass = predict(abovemodel, predict_above_df)
+predict_above_out = predict_above_df %>% 
+  mutate(above_dry = predict_above_mass^2)
+
+
+r_mass = predict_above_out %>% 
+  left_join(predict_below_out)%>% 
+  bind_rows(repot_mass %>%  select(1, 4:9)) %>% 
+  select(seedling_id, seedling_sp, soil_type, above_dry, below_dry) %>% 
+  drop_na()
+
+r_masscheck = predict_above_out %>% 
+  left_join(predict_below_out)  %>% 
+              mutate(set = "predict")%>% 
+  mutate(above_dry = above_dry) %>% 
+  bind_rows(repot_mass %>%  select(1, 4:9) %>% 
+              mutate(set = "fit")) 
+ggplot(r_masscheck, aes(x = above_area_cm2, y = above_dry, shape = seedling_sp, col = set))+
+  geom_point()
+```
+
+```{r}
+abovemodel = lm(adry_sq ~ above_area_cm2*seedling_sp, data =repot_mass)
+above_step = MASS::stepAIC(abovemodel)
+summary(above_step)
+
+belowmodel = lm(bdry_sq ~ underground_area_cm2*seedling_sp, data =repot_mass)
+below_step = MASS::stepAIC(belowmodel)
+summary(below_step)
+
+
+predict_below_df = repot_scan  %>% 
+  select(seedling_id, underground_area_cm2)%>% 
+  left_join(trt) %>% 
+  filter(! seedling_id %in% repot_mass$seedling_id)
+
+predict_below_mass = predict(below_step, predict_below_df)
+predict_below_out = predict_below_df %>% 
+  mutate(below_dry = predict_below_mass^2)
+
+predict_above_df = repot_scan  %>% 
+  select(seedling_id, above_area_cm2)%>% 
+  left_join(trt) %>% 
+  filter(! seedling_id %in% repot_mass$seedling_id)
+
+predict_above_mass = predict(above_step, predict_above_df)
+predict_above_out = predict_above_df %>% 
+  mutate(above_dry = predict_above_mass^2)
+
+```
+
+
+
+
+```{r}
+r_masscheck = predict_above_out %>% 
+  left_join(predict_below_out)  %>% 
+              mutate(set = "predict")%>% 
+  mutate(above_dry = above_dry) %>% 
+  bind_rows(repot_mass %>%  select(1, 4:9) %>% 
+              mutate(set = "fit"))
+
+below_plot = ggplot(r_masscheck %>% drop_na(), aes(x = sqrt(underground_area_cm2), y = sqrt(below_dry), 
+                                      shape = seedling_sp))+
+  geom_point(aes(col = set))+labs(x = expression(paste("Sqrt(Belowground area (cm"^"2","))")), y = "Sqrt(Belowground mass (g))")+
+  theme_minimal()+
+  scale_shape_manual(name = "Seedling \nspecies", values = c(16,17), breaks = c("P", "Q"), 
+                     labels = c("Bigcone", "Oak"))+
+  scale_color_manual(name = "", values = c("#1B1B1E","#AAAAAA"), breaks = c("fit", "predict"), 
+                     labels = c("Model input", "Model output")) +
+        geom_text(aes(x= 3,y=2.25, label=paste0("R2"," = ", round(summary(below_step)$adj.r.squared, 2), "\n",
+                                                "P-value = < 2.2e-16")))+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+
+above_plot = ggplot(r_masscheck %>% drop_na(), aes(x = sqrt(above_area_cm2), y = sqrt(above_dry), 
+                                      shape = seedling_sp))+
+  geom_point(aes(col = set))+labs(x = expression(paste("Sqrt(Aboveground area (cm"^"2","))")), y = "Sqrt(Aboveground mass (g))")+
+  theme_minimal()+
+  scale_shape_manual(name = "Seedling \nspecies", values = c(16,17), breaks = c("P", "Q"), 
+                     labels = c("Bigcone", "Oak"))+
+  scale_color_manual(name = "", values = c("#1B1B1E","#AAAAAA"), breaks = c("fit", "predict"), 
+                     labels = c("Model input", "Model output")) +
+        geom_text(aes(x= 1.2,y=1.75, label=paste0("R2"," = ", round(summary(above_step)$adj.r.squared, 2), "\n",
+                                                "P-value = < 2.2e-16")))+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+
+fit_plot = cowplot::plot_grid(
+  above_plot, below_plot,
+  ncol = 1
+)
+
+cowplot::save_plot(plot = fit_plot, 
+  base_height = 5,
+  base_asp = 1.5,filename =  here("figures", "repot_dryfit.jpg"))
+```
+
+
+```{r}
+ggplot(r_masscheck %>% drop_na() %>% filter(seedling_sp == "P"), 
+       aes(x = sqrt(underground_area_cm2), y = sqrt(below_dry), col = soil_type, shape = set))+
+  geom_point()+labs(x = expression(paste("Sqrt(Belowground area (cm"^"2","))")), y = "Sqrt(Belowground mass (g))")+
+  theme_minimal()+
+  scale_shape_manual(name = "", values = c(16,17), breaks = c("fit", "predict"), 
+                     labels = c("Model input", "Model output"))+
+  gg_soilcolor
+
+ggplot(r_masscheck %>% drop_na() %>% filter(seedling_sp == "Q"), 
+       aes(x = sqrt(underground_area_cm2), y = sqrt(below_dry), col = soil_type, shape = set))+
+  geom_point()+labs(x = expression(paste("Sqrt(Belowground area (cm"^"2","))")), y = "Sqrt(Belowground mass (g))")+
+  theme_minimal()+
+  scale_shape_manual(name = "", values = c(16,17), breaks = c("fit", "predict"), 
+                     labels = c("Model input", "Model output"))+
+  gg_soilcolor
+```
+
+
+```{r, eval = F}
+#write_csv(r_mass, here("data", "repotting", "repotting_drymass_fitted.csv"))
+```

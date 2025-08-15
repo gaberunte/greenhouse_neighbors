@@ -230,3 +230,39 @@ write_csv(pw_img_save, here("data", "image_processing", "pw_images.csv"))
 
 
 See file image_data.Rmd for a workflow to combine all written csv files into a single dataset. 
+```{r}
+drought = read_csv(here("data", "drought_treatments.csv")) %>% 
+  rename(drought_treat=treatment)
+
+size_master = read_csv(here("data", "seedling_measurements", "size_master.csv")) %>% 
+  mutate(length = case_when(
+    !is.na(branching) ~ branching + height_cm,
+    .default = height_cm)) %>% 
+  left_join(drought) %>% 
+  filter(date == "2023-03-01") %>% 
+  select(seedling_id, seedling_sp, soil_type)
+
+path.in = here("scan_delayed") #where are the raw photos? 
+files = list.files(path.in)
+
+img_tib_delay = tibble(files) %>% 
+  mutate(seedling_id = as.numeric(str_sub(files, 1,4))) %>% 
+  mutate(plant_compartment = str_sub(files, 6,6)) %>%
+  left_join(size_master)
+```
+
+```{r}
+path.out = here("scans_bw", "delayed") # Where shall we put the edited photos? 
+
+delay_img = img_tib_delay %>%  
+  mutate(image = map(files, ~ image_read(paste(path.in, .x, sep ="/")))) %>%
+  mutate(bw_image = map2(.x=image, .y = files, ~ bw_conversion(.x, .y, path.out))) %>%
+  mutate(blk_pixels = map_dbl(bw_image, ~bw_pixelcount(.x))) %>%
+  mutate(area = blk_pixels/(300*300*2.54*2.54)) #300dpi > in^2 > cm^2
+
+delay_img_save = delay_img %>% 
+  select(1:5, 8,9)
+
+write_csv(delay_img_save, here("data", "image_processing", "delayed_images.csv"))
+```
+

@@ -20,11 +20,11 @@ library(indicspecies)
 #Datasets
 ```{r datasets, message=FALSE, warning=FALSE}
 #reading in data
-taxon.path <- read_csv(here('data', 'otu_unite_repotting.csv'))%>%  # taxon path output from UNITE 
+taxon.path <- read_csv(here('data', 'illumina_data', 'otu_unite_repotting.csv'))%>%  # taxon path output from UNITE 
   clean_names() %>% 
   dplyr::rename(sequence = x1)
 
-funguilds <- read_csv(here('data','otu_unite_repotting_forfunguild.guilds.csv')) %>%  # guild data output from FUNGuild
+funguilds <- read_csv(here('data','funguild_docs','otu_unite_repotting_forfunguild.guilds.csv')) %>%  # guild data output from FUNGuild
  clean_names() %>% 
   dplyr::rename(sequence = x1) %>% 
   select(!taxonomy) 
@@ -32,7 +32,7 @@ funguilds <- read_csv(here('data','otu_unite_repotting_forfunguild.guilds.csv'))
 guilds_taxonomy = funguilds %>% 
   left_join(taxon.path, by = "sequence")
 
-otu_clusters = read_csv(here("data", "repotting_clusters.csv")) %>% 
+otu_clusters = read_csv(here("data", "sanger_data", "repotting_clusters.csv")) %>% 
   rename(asv =...1, otu = cluster)
 
 funguilds_otu = funguilds %>%
@@ -42,7 +42,7 @@ left_join(otu_clusters, by = "sequence")  %>%
 funguild_filtered = funguilds_otu[match(unique(funguilds_otu$otu_full), funguilds_otu$otu_full),] 
 
  
-asv.tab <- read_csv(here('data','repotting_otu_table.csv')) # otu table output from DADA2 and DECIPHER
+asv.tab <- read_csv(here('data', "repotting",'repotting_otu_table.csv')) # otu table output from DADA2 and DECIPHER
 asv.tab <- t(asv.tab)
 colnames(asv.tab) <- asv.tab[1,]
 asv.tab <- asv.tab[-1,]
@@ -60,13 +60,13 @@ asv.tib_wide = asv.tib %>%
 
 ```{r metadata stuff}
 #just before repotting
-seedling_size = read_csv(here("data", "ghecto_repotting_seedling_data.csv")) %>% 
+seedling_size = read_csv(here("data", "repotting", "ghecto_repotting_seedling_data.csv")) %>% 
   mutate(timepoint = "3")
-t3 = read_csv(here("data", "ghecto_repotting_seedling_data.csv")) %>% 
+t3 = read_csv(here("data", "repotting", "ghecto_repotting_seedling_data.csv")) %>% 
   mutate(timepoint = "3")
 
 #from the grow up in year 1 before repotting
-seedlings = read_csv(here("data", "seedling_measurements.csv")) %>%
+seedlings = read_csv(here("data", "seedling_measurements", "seedling_measurements.csv")) %>%
   clean_names()
 
 seedlings = seedlings[(match(unique(seedlings$seedling_id), seedlings$seedling_id)),] %>% 
@@ -78,7 +78,7 @@ post_repotting = read_csv(here("data", "post_repotting_measurements.csv")) %>%
   mutate(timepoint = "4")
 
 #which seedling was paired with which other seedling? they share a pot number 
-potting = read_csv(here("data", "ghecto_neighbor_pairs.csv")) %>% 
+potting = read_csv(here("data", "design", "ghecto_neighbor_pairs.csv")) %>% 
   clean_names()
 
 seedling_size = seedling_size %>% 

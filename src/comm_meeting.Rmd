@@ -1,0 +1,253 @@
+---
+title: "stats_design"
+author: "Gabe Runte"
+date: "2024-06-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(here)
+library(patchwork)
+library(multcompView)
+library(janitor)
+library(RColorBrewer)
+library(tidyverse)
+library(viridis)
+library(modelsummary)
+
+source(here("src", "colors.R"))
+```
+
+```{r}
+measure = read_csv(here("data", "seedling_measurements/size_master_all.csv"))
+repot_scan = read_csv(here("data/repotting", "seedling_scan_data.csv")) %>% 
+  select(-seedling_sp, -notes)
+repot_mass = read_csv(here("data", "repotting", "repotting_drymass_fitted.csv"))
+harvest_mass = read_csv(here("data", "harvest", "harvest_biomass_wideclean.csv")) %>% 
+  mutate(total = root+shoot+foliar)
+health = read_csv(here("data", "analysis/ndvi_data.csv")) %>% 
+  group_by(seedling_id) %>% 
+  summarise(ndvi = mean(mean_ndvi))
+image_data = read_csv(here("data", "wide_final_seedling_area.csv")) %>% 
+  rename(img_foliar = foliar)
+
+drought_treat = health %>% 
+  select(seedling_id, treatment) %>% distinct()
+total_treat = measure %>% 
+  select(seedling_id, seedling_sp, soil_type, neighbor, neighb_sp, neighb_st, pot) %>% distinct() %>% drop_na() %>% 
+  left_join(drought_treat)
+  plotset = measure %>% 
+  left_join(total_treat) %>% left_join(drought_treat)%>% 
+  filter(!is.na(treatment))
+
+
+ggplot(plotset, aes(x = as.factor(date), y = height_cm, fill = seedling_sp))+
+  geom_boxplot(outlier.shape = NA)+gg_spfill+theme_minimal()+scale_y_log10()+facet_wrap(~treatment) 
+
+ggplot(plotset %>%  filter(seedling_sp == "P"), aes(x = as.factor(date), y = height_cm, fill = treatment))+
+  geom_boxplot(outlier.shape = NA)+gg_droughtfill+theme_minimal()
+ggplot(plotset %>%  filter(seedling_sp == "Q"), aes(x = as.factor(date), y = height_cm, fill = treatment))+
+  geom_boxplot()+gg_droughtfill+theme_minimal()
+
+mass1 = harvest_mass %>% 
+  left_join(total_treat) %>% 
+  drop_na()
+
+ggplot(mass1, aes(x = neighb_sp, y = total, fill = seedling_sp))+
+  geom_boxplot()+facet_wrap(soil_type~neighb_st)
+```
+Building growth datasets
+```{r}
+massbuild1 = repot_mass %>% 
+  select(seedling_id, above_dry, below_dry) %>% 
+  rename(r_shoot = above_dry, r_root = below_dry) %>% 
+  mutate(r_total = r_shoot+r_root)
+massbuild2 = harvest_mass %>% 
+  mutate(h_shoot = shoot+foliar)%>% 
+  select(seedling_id, root, h_shoot, shoot, foliar) %>% 
+  rename(h_root = root)%>% 
+  mutate(h_total = h_shoot+h_root)
+
+biomass_growth = left_join(massbuild1, massbuild2) %>% 
+  mutate(g_root = (h_root-r_root)/r_root, 
+         g_shoot = (h_shoot-r_shoot)/r_shoot, 
+         g_total = (h_total-r_total)/r_total) %>% 
+  mutate(g_rs = h_root/h_shoot -r_root/r_shoot) %>% 
+  mutate(h_rs = h_root/h_shoot)
+  
+
+ht_growth = measure %>% 
+  select(seedling_id, date, height_cm) %>% 
+  filter(!date == "2022-07-01") %>% 
+  pivot_wider(names_from = date, values_from = height_cm, names_prefix = "ht_") %>% 
+  rename(mar_21 = 2, apr_21=3,dec_21=4,feb_22=5,apr_22=6,mar_23=7) %>% 
+  mutate(g_total_ht = (mar_23- apr_21)/apr_21)%>% 
+  mutate(g_predrought_ht = (apr_22- apr_21)/apr_21) %>% 
+  select(seedling_id, g_total_ht, g_predrought_ht)
+
+dia_growth = measure %>% 
+  select(seedling_id, date, diameter_mm) %>% 
+  filter(!date == "2022-07-01") %>% 
+  pivot_wider(names_from = date, values_from = diameter_mm, names_prefix = "dia_") %>% 
+  rename(mar_21 = 2, apr_21=3,dec_21=4,feb_22=5,apr_22=6,mar_23=7) %>% 
+  mutate(g_total_dia = (mar_23- apr_21)/apr_21)%>% 
+  mutate(g_predrought_dia = (apr_22- apr_21)/apr_21) %>% 
+  mutate(final_dia = mar_23) %>% 
+  select(seedling_id, g_total_dia, g_predrought_dia, final_dia)
+
+all_growth = left_join(biomass_growth,  left_join(ht_growth, dia_growth)) %>% 
+  drop_na() %>% 
+  left_join(total_treat)%>% 
+  left_join(image_data)
+  
+p_growth = all_growth %>% filter(seedling_sp == "P") %>% 
+  filter(shoot>0) %>% filter(foliar>0) 
+```
+
+
+```{r}
+lmx = lm(img_foliar/final_dia~soil_type*neighb_sp*neighb_st*treatment, data = p_growth)
+stepx = MASS::stepAIC(lmx)
+lmy = eval(stepx$call)
+modelplot(lmy, coef_omit = 'Interc') +
+  aes(color = ifelse(p.value < 0.05, "Significant", "Not significant"))
+```
+
+```{r}
+p_growth = all_growth %>% filter(seedling_sp == "P")
+
+lm1 = lm(g_total~soil_type*neighb_sp*neighb_st*treatment, data = p_growth)
+
+lm2= lm(g_total~soil_type*neighb_sp*neighb_st, data = p_growth %>% filter(treatment=="C"))
+lm3= lm(g_predrought_ht~soil_type*neighb_sp*neighb_st*treatment, data = p_growth)
+summary(lm1)
+summary(lm2)
+summary(lm3)
+
+stepper = MASS::stepAIC(lm3)
+
+stepper$call
+lm4 = eval(stepper$call)
+summary(lm4)
+
+
+modelplot(lm4, coef_omit = 'Interc') +
+  aes(color = ifelse(p.value < 0.05, "Significant", "Not significant"))
+# modlist=list(lm3, lm4)
+# modelplot(modlist)
+#plot(lm2$residuals)
+```
+
+
+```{r}
+step5 = MASS::stepAIC(lm(g_predrought_ht~soil_type*neighb_sp*neighb_st, data = p_growth))
+
+lm5=eval(step5$call)
+modelplot(lm5, coef_omit = 'Interc') +
+  aes(color = ifelse(p.value < 0.05, "Significant", "Not significant"))
+
+step5 = MASS::stepAIC(lm(g_total_ht~soil_type*neighb_sp*neighb_st*treatment, data = p_growth))
+
+
+lm5=eval(step5$call)
+modelplot(lm5, coef_omit = 'Interc') +
+  aes(color = ifelse(p.value < 0.05, "Significant", "Not significant"))
+
+step5 = MASS::stepAIC(lm(g_predrought_dia~soil_type*neighb_sp*neighb_st, data = p_growth))
+
+lm5=eval(step5$call)
+modelplot(lm5, coef_omit = 'Interc') +
+  aes(color = ifelse(p.value < 0.05, "Significant", "Not significant"))
+
+step5 = MASS::stepAIC(lm(g_total_dia~soil_type*neighb_sp*neighb_st*treatment, data = p_growth))
+
+lm5=eval(step5$call)
+modelplot(lm5, coef_omit = 'Interc') +
+  aes(color = ifelse(p.value < 0.05, "Significant", "Not significant"))
+
+step5 = MASS::stepAIC(lm(g_total_dia*g_total_ht~soil_type*neighb_sp*neighb_st*treatment, data = p_growth))
+
+lm5=eval(step5$call)
+modelplot(lm5, coef_omit = 'Interc') +
+  aes(color = ifelse(p.value < 0.05, "Significant", "Not significant"))
+```
+
+
+```{r}
+step5 = MASS::stepAIC(lm(g_total~soil_type*neighb_sp*neighb_st*treatment, data = p_growth))
+lm5=eval(step5$call)
+modelplot(lm5, coef_omit = 'Interc') +aes(color = ifelse(p.value < 0.05, "Significant", "Not significant"))
+
+step5 = MASS::stepAIC(lm(g_root~soil_type*neighb_sp*neighb_st*treatment, data = p_growth))
+lm5=eval(step5$call)
+modelplot(lm5, coef_omit = 'Interc') +aes(color = ifelse(p.value < 0.05, "Significant", "Not significant"))
+
+step5 = MASS::stepAIC(lm(g_shoot~soil_type*neighb_sp*neighb_st*treatment, data = p_growth))
+lm5=eval(step5$call)
+modelplot(lm5, coef_omit = 'Interc') + aes(color = ifelse(p.value < 0.05, "Significant", "Not significant"))
+
+step5 = MASS::stepAIC(lm(g_rs~soil_type*neighb_sp*neighb_st*treatment, data = p_growth))
+lm5=eval(step5$call)
+modelplot(lm5, coef_omit = 'Interc') + aes(color = ifelse(p.value < 0.05, "Significant", "Not significant"))
+
+step5 = MASS::stepAIC(lm(h_rs~soil_type*neighb_sp*neighb_st*treatment, data = p_growth))
+lm5=eval(step5$call)
+modelplot(lm5, coef_omit = 'Interc') + aes(color = ifelse(p.value < 0.05, "Significant", "Not significant"))
+```
+
+
+```{r}
+pg_noc = p_growth %>% 
+                           filter(soil_type %in% c("P", "Q")) %>% filter(neighb_st %in% c("P", "Q"))
+
+step5 = MASS::stepAIC(lm((g_total)~soil_type*neighb_sp*neighb_st*treatment, data = pg_noc))
+lm5=eval(step5$call)
+modelplot(lm5, coef_omit = 'Interc') +aes(color = ifelse(p.value < 0.05, "Significant", "Not significant"))
+
+step5 = MASS::stepAIC(lm(g_root~soil_type*neighb_sp*neighb_st*treatment, data = pg_noc))
+lm5=eval(step5$call)
+modelplot(lm5, coef_omit = 'Interc') +aes(color = ifelse(p.value < 0.05, "Significant", "Not significant"))
+
+step5 = MASS::stepAIC(lm(g_shoot~soil_type*neighb_sp*neighb_st*treatment, data = pg_noc))
+lm5=eval(step5$call)
+modelplot(lm5, coef_omit = 'Interc') + aes(color = ifelse(p.value < 0.05, "Significant", "Not significant"))
+
+step5 = MASS::stepAIC(lm(g_rs~soil_type*neighb_sp*neighb_st*treatment, data = pg_noc))
+lm5=eval(step5$call)
+modelplot(lm5, coef_omit = 'Interc') + aes(color = ifelse(p.value < 0.05, "Significant", "Not significant"))
+
+step5 = MASS::stepAIC(lm(h_rs~soil_type*neighb_sp*neighb_st*treatment, data = pg_noc))
+lm5=eval(step5$call)
+modelplot(lm5, coef_omit = 'Interc') + aes(color = ifelse(p.value < 0.05, "Significant", "Not significant"))
+
+
+```
+
+```{r}
+rel_out = all_growth  %>% 
+  left_join(health)%>% 
+  group_by(seedling_sp, soil_type, neighb_sp) %>% 
+  mutate(al_as = img_foliar/(pi*(0.5*final_dia)^2)) %>% 
+  mutate(al_as = img_foliar/final_dia) %>% 
+  mutate(fol = (img_foliar-mean(img_foliar))/sd(img_foliar)) %>% 
+  mutate(alas = (al_as-mean(al_as))/sd(al_as))  %>% 
+  filter(seedling_sp=="P")
+
+#%>%  mutate(ndvi = (ndvi-mean(ndvi))/sd(ndvi))
+
+lmx = lm(ndvi~soil_type*neighb_sp*neighb_st*treatment, data = rel_out)
+stepx = MASS::stepAIC(lmx)
+lmy = eval(stepx$call)
+modelplot(lmy, coef_omit = 'Interc') +
+  aes(color = ifelse(p.value < 0.05, "Significant", "Not significant"))
+```
+
+
+
+
+
+
+
+

@@ -194,10 +194,17 @@ plot(img_150)
 plot(img_175)
 
 imagex = jpeg::readJPEG(here("calibrated_photos", total$photos[3]))
+dim(imagex)
 
 imagey = raster(imagex[,,3])
 plot(imagey)
 ```
+
+```{bash}
+
+```
+
+
 
 ```{r}
 

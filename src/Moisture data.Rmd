@@ -80,12 +80,11 @@ moist.sep = soil.moisture %>%
 
 ggplot(data= moist.sep, aes(x = date, y = moisture)) +
   geom_bar(data= clim, aes(x= date, y= precip), fill = 'steelblue4',col = NA,stat="identity", alpha = 0.6,width = 4)+
-  geom_boxplot(data= moist.sep, aes(x = date, y = moisture, fill = treatment, group = group), col = "grey40", outlier.alpha = 0.5) +
+  geom_boxplot(data= moist.sep, aes(x = date, y = moisture, fill = treatment, group = group), col = "grey40", outlier.alpha = 0) +
     labs(
     y= "Percent soil moisture (%)",
     x="Date") +
-  theme_minimal()+
-    scale_fill_manual(values= c("seagreen4", "khaki3"), name= "Treatment", labels= c("Watered", "Droughted")) +
+  theme_minimal()+gg_droughtfill+
    scale_y_continuous(
     
     # Features of the first axis
@@ -96,6 +95,15 @@ ggplot(data= moist.sep, aes(x = date, y = moisture)) +
   theme(axis.text.y.right = element_text(color = "steelblue4"),
         axis.title.y.right = element_text(color = "steelblue4"),
         axis.title.x = element_blank())
+```
+
+
+```{r}
+summary(aov(moisture~treatment, data = moist.sep))
+```
+
+
+```{r}
 #ggsave(here("figures", "soil_moisture_climate.png"), width = 7, height = 5)
 ggplot(data= moist.sep, aes(x = date, y = moisture)) +
   geom_bar(data= clim, aes(x= date, y= precip), fill = 'steelblue4',col = NA,stat="identity", alpha = 0.75,width = 4)+

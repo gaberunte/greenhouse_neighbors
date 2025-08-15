@@ -1,0 +1,300 @@
+---
+title: "Untitled"
+author: "Gabe Runte"
+date: "12/15/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(vegan)
+library(here)
+library(janitor)
+library(gridExtra)
+library(RColorBrewer)
+
+```
+
+First, I will pull in all of the sequences that I want to assign taxonomy to. Workflow is as follows:
+1. Pull all of the consensus sequences
+2. Combine with list of sequences not assigned to a contig
+3. Map these onto the total list of sequences, allowing one to then remove samples with short sequences or with <2% high quality bp reads
+4. Create final list of sequences to be assigned taxonomy
+```{r, message = F}
+folder = "data/sanger_data/repot_oldnew"
+
+consensus = read_csv(here(folder, "consensus.csv")) %>% 
+  clean_names() %>% 
+  dplyr::select(name, sequence) %>% 
+  rename(sequence_list_name = name)
+
+contig_assign = read_csv(here(folder, "contigs.csv")) %>% 
+  clean_names() %>% 
+  rename(contig_sequence = sequence) %>% 
+  left_join(consensus)
+
+metadata = read_csv(here(folder, "all_seqs.csv")) %>% 
+  clean_names() %>% 
+  rename(original_seq = sequence) %>% 
+  left_join(contig_assign) %>% 
+  mutate(sequence = case_when(
+    is.na(sequence_list_name) ~ original_seq,
+    !is.na(sequence_list_name) ~ sequence
+  )) %>% 
+  select(!original_seq)%>% 
+  select(!contig_sequence) %>% 
+  filter(!is.na(sequence))
+```
+
+
+
+```{r, eval = FALSE}
+unite.ref <- "/Users/Gabe/Desktop/phd/ghecto/unite_db/sh_general_release_s_10.05.2021/sh_general_release_dynamic_s_10.05.2021.fasta"
+unique_sequences = unique(metadata$sequence)
+tiptaxa = dada2::assignTaxonomy(unique_sequences, unite.ref, multithread = TRUE, tryRC = TRUE)
+
+
+unite_taxa = tibble(as.data.frame(tiptaxa)) %>% 
+  mutate(sequence = rownames(tiptaxa))
+write_csv(unite_taxa, here(folder, "unite_output.csv"))
+```
+
+
+```{r}
+
+tip_wells = read_csv(here("data", "repotting", "ghecto_repotting_root_pulling_data.csv"))
+treat = read_csv(here("data/design", "seedling_treatments.csv"))
+
+tips_long = tip_wells %>% 
+  pivot_longer(A:H, names_to = "well", values_to = "morphotype" )  %>% 
+  filter(!is.na(morphotype)) %>% 
+  left_join(treat)%>% 
+  mutate(morphotype = str_sub(morphotype, 1,1)) %>% 
+  rename(row = well) %>% 
+  select(seedling_id, soil_type, seedling_sp, plate, column, row, morphotype)
+
+
+unite_taxa = read_csv(here(folder, "unite_output.csv")) 
+sample_sheet_initial = read_csv(here("data/sanger_data", "nov2023_repotting_seqset.csv")) 
+sample_sheet_build = read_csv(here("data/sanger_data", "nov2023_repotting_seqset.csv")) %>% 
+  left_join(tibble(expand_grid(unique(sample_sheet_initial$column), c("A", "B", "C", "D", "E", "F", "G", "H"))) %>% 
+              rename(column= 1, row = 2))%>% 
+  mutate(re_row = row)
+
+repot5 = read_csv(here("data/sanger_data", "nov2023_repotting_morphoset.csv")) %>% 
+  rename(re_plate = n_plate, re_column = n_column, re_row = n_row) %>% 
+  mutate(plate = plate +219000) %>% 
+  left_join(tips_long)
+
+sample_sheet_repot = sample_sheet_build %>% 
+  bind_rows(repot5 %>%  select(!morphotype))
+
+seedlings = read_csv(here("data/analysis","size_master.csv" )) %>% 
+  select(seedling_id, seedling_sp, soil_type, neighb_sp, neighb_st) %>% 
+  distinct() %>% 
+  filter(!is.na(neighb_sp))
+
+tip_seqs_repot = metadata %>% 
+  left_join(unite_taxa) %>% 
+  clean_names() %>% 
+  filter(str_sub(name, 1,1)== "g")%>% 
+  separate(name, into = c("project", "re_plate", "re_column", "re_row")) %>% 
+  mutate(re_plate = paste0("repot_", str_sub(re_plate, 6,6))) %>% 
+  mutate(re_column = as.numeric(re_column)) %>% 
+  select(-project) %>% 
+  left_join(sample_sheet_repot, by = c("re_plate", "re_column", "re_row")) 
+
+tip_seqs_dest = metadata %>% 
+  left_join(unite_taxa) %>% 
+  clean_names()  %>% 
+  filter(str_sub(name, 1,1)== "p") %>% 
+  mutate(plate = 219000 + as.numeric(str_sub(name, 2,3))) %>% 
+  mutate(column = case_when(
+    str_length(name)==21~ str_sub(name, 5,5),
+    str_length(name)==22~ str_sub(name, 5,6)
+    )) %>% 
+  mutate(row = case_when(
+    str_length(name)==21~ str_sub(name, 6,6),
+    str_length(name)==22~ str_sub(name, 7,7))) %>% 
+  mutate(column = as.numeric(column))
+
+
+tip_seqs = tip_seqs_repot%>% 
+  bind_rows(tip_seqs_dest) %>% 
+  mutate(taxonomy = paste(kingdom, phylum, class, order, family, genus, species, sep = ";")) %>% 
+  mutate(sample = paste(re_plate, re_column, re_row, sep = "_")) %>% 
+  left_join(tips_long)
+
+
+
+fung_df = tip_seqs %>% 
+  select(sample, taxonomy)
+
+write_csv(fung_df, here(folder, "taxa_funguild.csv"))
+#open file with xcel or other spreadsheet software then convert to .txt file at same file path (see below)
+here(folder, "taxa_funguild.txt")
+```
+
+```{bash, engine.opts='-l', eval = F}
+
+python /Users/Gabe/Desktop/phd/FUNGuild-master/Guilds_v1.1.py -otu /Users/Gabe/Desktop/phd/ghecto/data/sanger_data/repot_oldnew/taxa_funguild.txt
+```
+
+```{r}
+
+guilds = read_csv(here(folder, "taxa_funguild.guilds.csv")) %>% 
+  clean_names()
+
+tip_all = tip_seqs %>% 
+  left_join(guilds) %>%
+  filter(str_detect(guild, "Ectomycorrhizal")) 
+
+ggplot(tip_all, aes(x = morphotype, fill = genus))+
+  geom_bar()
+
+ggplot(tip_all, aes(x = morphotype, fill = genus))+
+  geom_bar()+facet_grid(rows = vars(seedling_sp))
+
+```
+
+```{r}
+
+tip_all_view = tip_all %>% 
+  select(plate, column, row, seedling_id, morphotype, genus, species)%>% 
+  mutate(pcr = paste0(plate, column, row))%>% 
+  mutate(sampleset = "ecto")  # all ecto samples
+tip_seqs_view = tip_seqs %>% 
+  select(plate, column, row, seedling_id, morphotype) %>% 
+  mutate(pcr = paste0(plate, column, row)) %>%
+  filter(!pcr %in% tip_all_view$pcr)%>% 
+  mutate(sampleset = "badseq") # all sequences including non-ecto
+sample_sheet_view = sample_sheet_repot %>% 
+  left_join(tips_long %>% select(plate, column, row, morphotype)) %>% 
+  select(plate, column, row, seedling_id, morphotype)%>% 
+  mutate(pcr = paste0(plate, column, row))%>%
+  filter(!pcr %in% tip_all_view$pcr) %>% 
+  mutate(sampleset = "noamp")  # all repot samples
+
+# need: genus, species, seedling_id, morphotype, sample_group, plate, column, row
+
+view_set = bind_rows(tip_all_view, tip_seqs_view, sample_sheet_view) %>% 
+  mutate(genus = str_sub(genus, 4)) %>% 
+  mutate(genus_id = case_when(
+    !is.na(genus) ~genus,
+    sampleset == "noamp" ~ "No Amp", 
+    .default =  "Bad Seq"
+  )) %>% 
+  left_join(treat)
+
+ggplot(view_set, aes(x = morphotype, fill = genus_id))+
+  geom_bar()+
+  scale_fill_manual(breaks = c("No Amp", "Bad Seq", "Cenococcum", "Peziza",
+                               "Pustularia", "Rhizopogon", "Suillus", "Tuber"),
+                    values = c("azure3", "azure4", "firebrick2", "darkorange2", "gold2", "palegreen4", "steelblue", "mediumpurple"))
+
+ggplot(view_set %>% 
+         filter(seedling_sp == "P"), aes(x = morphotype, fill = genus_id))+
+  geom_bar()+
+  scale_fill_manual(breaks = c("No Amp", "Bad Seq", "Cenococcum", "Peziza",
+                               "Pustularia", "Rhizopogon", "Suillus", "Tuber"),
+                    values = c("azure3", "azure4", "firebrick2", "darkorange2", "gold2", "palegreen4", "steelblue", "mediumpurple"))+ facet_wrap(~soil_type, scales = "free")
+
+ggplot(view_set %>% 
+         filter(seedling_sp == "Q"), aes(x = morphotype, fill = genus_id))+
+  geom_bar()+
+  scale_fill_manual(breaks = c("No Amp", "Bad Seq", "Cenococcum", "Peziza",
+                               "Pustularia", "Rhizopogon", "Suillus", "Tuber"),
+                    values = c("azure3", "azure4", "firebrick2", "darkorange2", "gold2", "palegreen4", "steelblue", "mediumpurple"))+ facet_wrap(~soil_type, scales = "free")
+```
+
+```{r}
+dest_ect = read_csv(here("data", "sanger_data", "ecto_desttips_10122022.csv")) %>% 
+  mutate(plate = 219000+plate) %>% 
+  select(plate, column, row, seedling_id, seedling_sp, soil_type, genus, species, morphotype)
+
+comb_tip_all = tip_all %>% 
+  select(plate, column, row, seedling_id, seedling_sp, soil_type, genus, species, morphotype)
+
+comb_all = bind_rows(dest_ect, comb_tip_all)
+
+ggplot(comb_all, aes(x = morphotype, fill = genus))+
+  geom_bar()+facet_grid(rows = vars(seedling_sp), scales = "free")
+
+ggplot(comb_all %>% 
+         filter(morphotype != "G"), aes(x = morphotype, fill = genus))+
+  geom_bar()+facet_grid(rows = vars(seedling_sp))
+
+ggplot(tips_long, aes(x = morphotype, fill = morphotype))+
+  geom_bar()+facet_wrap(~seedling_sp)
+
+ggplot(tips_long, aes(x = morphotype, fill = morphotype))+
+  geom_bar()+facet_wrap(~seedling_sp, scales = "free")
+
+ggplot(comb_all, aes(x = as.factor(seedling_id), fill = genus))+
+  geom_bar()+facet_wrap(~morphotype, scales = "free")
+
+ggplot(comb_all %>% 
+         filter(seedling_sp == "P"), aes(x = as.factor(seedling_id), fill = genus))+
+  geom_bar()+facet_grid(cols = vars(morphotype), rows = vars(soil_type), scales = "free")
+
+ggplot(comb_all %>% 
+         filter(seedling_sp == "P")%>% 
+         filter(morphotype == "M"), aes(x = as.factor(seedling_id), fill = genus))+
+  geom_bar()+facet_wrap(~soil_type, scales = "free")
+
+
+ggplot(comb_all %>% 
+         filter(seedling_sp == "Q"), aes(x = as.factor(seedling_id), fill = genus))+
+  geom_bar()+facet_grid(cols = vars(morphotype), rows = vars(soil_type), scales = "free")
+ggplot(comb_all %>% 
+         filter(seedling_sp == "Q")%>% 
+         filter(morphotype == "C"), aes(x = as.factor(seedling_id), fill = genus))+
+  geom_bar()+facet_wrap(~soil_type, scales = "free")
+
+```
+- M probably could use some more investigation!
+- J could use a couple more PQ reps
+- A could use a couple more QP
+
+```{r}
+ggplot(tips_long, aes(x = as.factor(seedling_id), fill = morphotype))+
+  geom_bar()+facet_wrap(~soil_type, scales = "free")
+
+ggplot(tips_long %>% 
+         filter(seedling_sp == "Q") %>% 
+         filter(soil_type == "Q") %>% 
+         filter(morphotype %in% c("C", "A", "D", "L")) %>% 
+         filter(!seedling_id %in% comb_all$seedling_id), aes(x = as.factor(seedling_id), fill = morphotype))+
+  geom_bar()+facet_wrap(~morphotype, scales = "free")
+```
+
+5x more seedlings with A, C, D, 4 more with L
+
+```{r}
+set.seed(805)
+next_seedlings = tips_long %>% 
+         filter(seedling_sp == "Q") %>% 
+         filter(soil_type == "Q") %>% 
+         filter(morphotype %in% c("C", "A", "D", "L")) %>% 
+  filter(plate < 219022) %>% 
+  group_by(seedling_id, morphotype) %>% 
+  summarize(n = n()) %>%  ungroup () %>% 
+  group_by(morphotype)%>% 
+  sample_n(5) %>% 
+  select(-n) %>% 
+  left_join(tips_long) %>%
+  arrange(plate, column, row) %>% 
+  mutate(re_plate = "repot6") %>% 
+  ungroup() %>% 
+  mutate(re_column = rep(1:12, each = 8, length.out = n()))%>% 
+  mutate(re_row = rep(c("A", "B", "C", "D", "E", "F", "G", "H"), length.out = n()))
+
+
+#write_csv(next_seedlings %>% select(1,2,5:10), here("data/sanger_data", "repot6_set.csv"))
+```
+
+
+
+

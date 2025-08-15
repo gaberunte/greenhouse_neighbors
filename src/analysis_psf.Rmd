@@ -1,0 +1,309 @@
+---
+title: "PSF triangle"
+author: "Gabe Runte"
+date: "2024-02-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(here)
+library(janitor)
+library(RColorBrewer)
+library(tidyverse)
+
+source(here("src", "colors.R"))
+```
+
+## Read in files
+```{r, message = F}
+measure = read_csv(here("data", "analysis/size_master.csv"))
+harvest = read_csv(here("data", "analysis/harvest_metrics.csv")) 
+health = read_csv(here("data", "analysis/ndvi_data.csv"))
+harvest_tips = read_csv(here("data", "analysis/harvest_roottips - all.csv")) %>% 
+  filter(!is.na(seedling_id))
+repot_tips = read_csv(here("data", "repotting/ghecto_repotting_root_pulling_data.csv"))
+harvest_mass = read_csv(here("data", "harvest", "harvest_biomass_wideclean.csv"))
+image_data = read_csv(here("data", "wide_final_seedling_area.csv"))
+repot_mass = read_csv(here("data", "repotting", "repotting_drymass_fitted.csv"))
+neighb_pairs = read_csv(here("data", "design", "ghecto_neighbor_pairs.csv"))
+trt = read_csv(here("data", "design", "seedling_treatments.csv"))
+drought = read_csv(here("data", "design", "drought_assignments_bypot.csv")) %>% select(1,3)
+harvest_comm = read_csv( here("data", "harvest", "harvest_community_matrix_scaled.csv"))
+
+pressure = read_csv(here("data/harvest", "pressure_bomb - Sheet1.csv")) %>% select(1:4) %>%  mutate(time = tolower(time))
+sapwood = read_csv(here("data/harvest", "harvest_sapwood.csv"))
+
+drought_treat = health %>% 
+  select(seedling_id, treatment) %>% distinct()
+
+total_treat = measure %>% 
+  select(seedling_id, seedling_sp, soil_type, neighbor, neighb_sp, neighb_st, pot) %>% distinct() %>% drop_na() %>% left_join(drought_treat)
+living = measure %>% 
+  filter(date == "2022-04-01") %>% 
+  filter(alive ==1) %>% 
+  filter(neighb_alive == 1) %>% 
+  select(seedling_id)
+
+colonization = repot_tips %>% 
+  mutate(repot_col = colonization_numerator/colonization_denominator) %>% 
+  select(seedling_id, repot_col) %>% 
+  left_join(harvest_tips %>% mutate(harvest_col = colonized/(colonized+uncolonized)) %>% 
+              select(seedling_id, harvest_col) %>% 
+              mutate(seedling_id = as.numeric(seedling_id)))
+```
+
+
+```{r}
+mass_long = repot_mass %>% 
+  rename(root = below_dry, shoot = above_dry) %>% 
+  mutate(period = "Indiv. pots") %>% 
+  select(seedling_id, root, shoot, period) %>% 
+  mutate(rs = root/shoot) %>% 
+  bind_rows(harvest_mass %>% 
+              mutate(shoot = shoot+foliar)  %>% 
+              mutate(rs = root/shoot) %>% 
+              left_join(repot_mass %>% 
+              rename(r_root = below_dry, r_shoot = above_dry) %>% 
+                mutate(r_rs = r_root/r_shoot) %>% 
+              select(seedling_id, r_root, r_shoot, r_rs))%>% 
+              mutate(root = root-r_root, shoot = shoot-r_shoot) %>% 
+              select(seedling_id, root, shoot, rs)%>% 
+  mutate(period = "Co-potting")) %>% 
+  left_join(total_treat) %>% 
+  mutate(total = root+shoot) %>% 
+  filter(seedling_id %in% living$seedling_id)  %>% 
+  filter(is.finite(rs))%>% 
+  mutate(neighb = paste0(neighb_sp, neighb_st))
+
+mass_cohorts = mass_long %>% 
+  group_by(seedling_sp, soil_type, treatment, period, neighb) %>% 
+  summarize(root = mean(root, na.rm = T),
+           shoot = mean(shoot, na.rm = T),
+           total = mean(total, na.rm = T),
+           rs = mean(rs, na.rm = T)) %>% 
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Sterile soil"
+  ))%>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  )) %>% 
+  mutate(trt_long = case_when(
+    treatment == "C" ~ "Watered",
+    treatment == "D" ~ "Droughted"
+  ))
+
+ggplot(mass_cohorts %>% filter(seedling_sp == "P"), aes(x = neighb, y = total, fill = period))+geom_bar(stat = "identity")+
+  facet_grid(treatment~soil_type)
+
+ggplot(mass_cohorts %>% filter(seedling_sp == "P"), aes(x = neighb, y = total, fill = period))+geom_bar(stat = "identity",position='fill')+
+  facet_grid(treatment~soil_type)
+
+
+ggplot(mass_cohorts %>% filter(seedling_sp == "P"), 
+       aes(x = neighb, y = total, col = period, fill = rs))+
+  geom_bar(stat = "identity",position='fill')+
+  facet_grid(treatment~soil_type)
+
+ggplot(mass_cohorts %>% filter(seedling_sp == "P"), 
+       aes(x = neighb, y = total, col = period, fill = rs))+
+  geom_bar(stat = "identity")+
+  facet_grid(treatment~soil_type)+
+  scale_fill_distiller(type = "div", direction = -1)
+
+ggplot(mass_cohorts %>% filter(seedling_sp == "Q"), 
+       aes(x = neighb, y = total, col = period, fill = rs))+
+  geom_bar(stat = "identity")+
+  facet_grid(treatment~soil_type)+
+  scale_fill_distiller(type = "div", direction = -1)
+
+
+ggplot(mass_cohorts %>% filter(seedling_sp == "P"), 
+       aes(x = neighb, y = root, col = period, fill = rs))+
+  geom_bar(stat = "identity")+
+  facet_grid(treatment~soil_type)+
+  scale_fill_distiller(type = "div", direction = -1)
+
+ggplot(mass_cohorts %>% filter(seedling_sp == "Q"), 
+       aes(x = neighb, y = root, col = period, fill = rs))+
+  geom_bar(stat = "identity")+
+  facet_grid(treatment~soil_type)+
+  scale_fill_distiller(type = "div", direction = -1)
+
+ggplot(mass_cohorts %>% filter(soil_type == "C") %>% 
+         filter(!(seedling_sp == "Q" & neighb == "PP")), 
+       aes(x = neighb, y = root, col = period, fill = rs))+
+  geom_bar(stat = "identity")+
+  facet_grid(treatment~seedling_sp, scales = "free")+
+  scale_fill_distiller(type = "div", direction = -1)
+```
+
+
+```{r}
+
+
+ggplot(mass_cohorts %>% filter(seedling_sp == "P")%>% 
+         filter(neighb != "QC"), 
+       aes(x = neighb, y = total, col = period, fill = rs), fill = "white")+
+  geom_bar(stat = "identity", lwd = .8, alpha = 0.8)+
+  geom_hline(yintercept = 0, col= "darkgray")+
+  facet_grid(trt_long~st_long) +
+  scale_color_manual(name = "Time period", values = c( "#A44A3F", "#5FB0B7"))+theme_minimal()+ scale_fill_viridis_c(name = "Root:shoot",direction = -1)+
+  labs(title = "Bigcones", y = "Total Biomass", x = "Neighbor species, neighbor soil")
+
+ggplot(mass_cohorts %>% filter(seedling_sp == "P") %>% 
+         filter(neighb != "QC"), 
+       aes(x = neighb, y = total, col = period, fill = rs), fill = "white")+
+  geom_bar(stat = "identity", lwd = .8, alpha = 0.8, position = "fill")+
+  geom_hline(yintercept = 0, col= "darkgray")+
+  facet_grid(trt_long~st_long) +
+  scale_color_manual(name = "Time period", values = c( "#A44A3F", "#5FB0B7"))+theme_minimal()+ scale_fill_viridis_c(name = "Root:shoot",direction = -1)+
+  labs(title = "Bigcones", y = "Total Biomass", x = "Neighbor species, neighbor soil")
+
+ggplot(mass_cohorts %>% filter(seedling_sp == "Q") %>% 
+         filter(!(soil_type == "C" & neighb=="PP")), 
+       aes(x = neighb, y = total, col = period, fill = rs), fill = "white")+
+  geom_bar(stat = "identity", lwd = .8, alpha = 0.8)+
+  geom_hline(yintercept = 0, col= "darkgray")+
+  facet_grid(trt_long~st_long) +
+  scale_color_manual(name = "Time period", values = c( "#A44A3F", "#5FB0B7"))+theme_minimal()+ scale_fill_viridis_c(name = "Root:shoot",direction = -1)+
+  labs(title = "Oaks", y = "Total Biomass", x = "Neighbor species, neighbor soil")
+
+```
+
+
+
+```{r}
+hm = harvest_mass %>% 
+  mutate(rs = root/(shoot+foliar)) %>% 
+  mutate(shoot = shoot+foliar) %>% 
+  select(-foliar) %>% 
+  left_join(total_treat) %>% 
+  filter(seedling_sp =="P") %>% 
+  filter(soil_type != "C")%>% 
+  filter(neighb_st != "C") %>%
+  filter(treatment != "D") %>%
+  mutate(total = root+shoot) %>% 
+  filter(is.finite(rs)) %>% 
+  left_join(colonization)
+
+MASS::stepAIC(lm(root~soil_type*neighb_sp*neighb_st, data = hm))
+MASS::stepAIC(lm(shoot~soil_type*neighb_sp*neighb_st, data = hm))
+MASS::stepAIC(lm(total~soil_type*neighb_sp*neighb_st, data = hm))
+MASS::stepAIC(lm(rs~soil_type*neighb_sp*neighb_st, data = hm))
+
+summary(lm(formula = root ~ soil_type + neighb_sp + soil_type:neighb_sp, 
+    data = hm)
+)
+
+```
+
+```{r}
+
+
+hm = mass_long %>% 
+  filter(seedling_sp =="Q") %>% 
+  filter(soil_type != "C")%>% 
+  filter(neighb_st != "C") %>% 
+  filter(treatment =="D")
+
+MASS::stepAIC(lm(root~soil_type*neighb_sp*neighb_st, data = hm))
+MASS::stepAIC(lm(shoot~soil_type*neighb_sp*neighb_st, data = hm))
+MASS::stepAIC(lm(total~soil_type*neighb_sp*neighb_st, data = hm))
+MASS::stepAIC(lm(log(rs)~soil_type*neighb_sp*neighb_st, data = hm))
+
+summary(lm(formula = log(rs) ~ soil_type * neighb_sp * neighb_st, data = hm)
+
+
+)
+```
+
+```{r}
+hm = harvest_mass %>% 
+              mutate(shoot = shoot+foliar)  %>% 
+              mutate(rs = root/shoot) %>% 
+              left_join(repot_mass %>% 
+              rename(r_root = below_dry, r_shoot = above_dry) %>% 
+                mutate(r_rs = r_root/r_shoot) %>% 
+              select(seedling_id, r_root, r_shoot, r_rs))%>% 
+              mutate(root = root/r_root, shoot = shoot/r_shoot, 
+                     total = (root+shoot)/(r_root+r_shoot), rs = (root/shoot)/(r_root/r_shoot), 
+                     r_rs = (r_root/r_shoot)) %>% 
+              select(seedling_id, root, shoot, total, rs, r_rs)%>% 
+  left_join(total_treat) %>% 
+  filter(seedling_sp =="P") %>% 
+  filter(soil_type != "C")%>% 
+  filter(neighb_st != "C") %>%
+  filter(treatment == "D") %>% 
+  filter(total<100)%>% 
+  left_join(colonization)
+
+
+
+ggplot(hm, aes(fill = neighb_sp, y = total, x = treatment))+
+  geom_boxplot(alpha = 0.7, outlier.shape = NA)+facet_wrap(~soil_type)+
+  geom_point(position= position_jitterdodge(jitter.width = .15), 
+                           aes(col = neighb_sp))+gg_nspfill+gg_nspcolor
+
+ggplot(hm, aes(fill = neighb_sp, y = total, x = soil_type, col = neighb_st))+
+  geom_boxplot(alpha = 0.7)+facet_wrap(~treatment)+gg_nspfill+gg_nsoilcolor
+
+
+t.test(total~neighb_sp, data =hm %>% filter(treatment == "C"))
+t.test(total~neighb_sp, data =hm %>% filter(treatment == "D"))
+
+t.test(total~treatment, data =hm %>% filter(neighb_sp == "P"))
+t.test(total~treatment, data =hm %>% filter(neighb_sp == "Q"))
+
+
+MASS::stepAIC(lm(root~soil_type*neighb_sp*neighb_st*r_rs, data = hm))
+MASS::stepAIC(lm(shoot~soil_type*neighb_sp*neighb_st*r_rs, data = hm))
+MASS::stepAIC(lm(total~soil_type*neighb_sp*neighb_st*r_rs, data = hm))
+MASS::stepAIC(lm(rs~soil_type*neighb_sp*neighb_st*r_rs, data = hm))
+
+summary(lm(formula = total ~ soil_type + neighb_sp + neighb_st + r_rs + 
+    soil_type:neighb_st, data = hm)
+)
+
+```
+
+## Can I convince myself that sterile oaks are influences by the soil of their neighbor? 
+```{r}
+c_oaks = harvest_mass %>% 
+              mutate(shoot = shoot+foliar)  %>% 
+              mutate(rs = root/shoot) %>% 
+              left_join(repot_mass %>% 
+              rename(r_root = below_dry, r_shoot = above_dry) %>% 
+                mutate(r_rs = r_root/r_shoot) %>% 
+              select(seedling_id, r_root, r_shoot, r_rs))%>% 
+              mutate(root = root/r_root, shoot = shoot/r_shoot, 
+                     total = (root+shoot)/(r_root+r_shoot), rs = (root/shoot)/(r_root/r_shoot), 
+                     r_rs = (r_root/r_shoot)) %>% 
+              select(seedling_id, root, shoot, total, rs, r_rs)%>% 
+  left_join(total_treat) %>% 
+  filter(seedling_sp =="Q")  %>% 
+  filter(soil_type == "C") %>% 
+  left_join(health %>% 
+              filter(sample == 4) %>% 
+              select(seedling_id, mean_ndvi))%>% 
+  mutate(neighb_st = fct_relevel(neighb_st, "P", "Q", "C"))
+
+ggplot(c_oaks, aes(x = neighb_st, y = total, fill = neighb_st))+
+  geom_boxplot()+facet_wrap(~treatment)+gg_nsoilfill
+
+ggplot(c_oaks, aes(x = neighb_st, y = root, fill = neighb_st))+
+  geom_boxplot()+facet_wrap(~treatment)+gg_nsoilfill
+
+ggplot(c_oaks, aes(x = neighb_st, y = shoot, fill = neighb_st))+
+  geom_boxplot()+facet_wrap(~treatment)+gg_nsoilfill
+
+ggplot(c_oaks, aes(x = neighb_st, y = mean_ndvi, fill = neighb_st))+
+  geom_boxplot()+facet_grid(neighb_sp~treatment)+gg_nsoilfill
+
+MASS::stepAIC(lm(mean_ndvi~ neighb_st*neighb_sp*treatment, data = c_oaks))
+summary(lm(formula = mean_ndvi ~ treatment, data = c_oaks))
+```
+

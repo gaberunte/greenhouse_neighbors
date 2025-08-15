@@ -1,0 +1,993 @@
+---
+title: "results"
+author: "Gabe Runte"
+date: "2024-07-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(here)
+library(janitor)
+library(RColorBrewer)
+library(tidyverse)
+
+source(here("src", "colors.R"))
+```
+
+## Read in files
+```{r, message = F}
+measure = read_csv(here("data", "analysis/size_master.csv"))
+harvest = read_csv(here("data", "analysis/harvest_metrics.csv")) 
+health = read_csv(here("data", "analysis/ndvi_data.csv"))
+harvest_tips = read_csv(here("data", "analysis/harvest_roottips - all.csv")) %>% 
+  filter(!is.na(seedling_id))
+repot_tips = read_csv(here("data", "repotting/ghecto_repotting_root_pulling_data.csv"))
+harvest_mass = read_csv(here("data", "harvest", "harvest_biomass_wideclean.csv"))
+image_data = read_csv(here("data", "wide_final_seedling_area.csv"))
+repot_mass = read_csv(here("data", "repotting", "repotting_drymass_fitted.csv"))
+neighb_pairs = read_csv(here("data", "design", "ghecto_neighbor_pairs.csv"))
+trt = read_csv(here("data", "design", "seedling_treatments.csv"))
+drought = read_csv(here("data", "design", "drought_assignments_bypot.csv")) %>% select(1,3)
+harvest_comm = read_csv( here("data", "harvest", "harvest_community_matrix_scaled.csv"))
+
+pressure = read_csv(here("data/harvest", "pressure_bomb - Sheet1.csv")) %>% select(1:4) %>%  mutate(time = tolower(time))
+sapwood = read_csv(here("data/harvest", "harvest_sapwood.csv"))
+```
+
+### Edit/compile some files
+```{r, warning = F, message=F}
+colonization = repot_tips %>% 
+  mutate(repot_col = case_when(
+    colonization_numerator == 0 ~ 0,
+    .default = colonization_numerator/colonization_denominator)) %>% 
+  select(seedling_id, repot_col) %>% 
+  left_join(harvest_tips %>% 
+              mutate(harvest_col = case_when(
+                    colonized == 0 ~ 0,
+                    .default =colonized/(colonized+uncolonized))) %>% 
+              select(seedling_id, harvest_col) %>% 
+              mutate(seedling_id = as.numeric(seedling_id)))
+
+drought_treat = health %>% 
+  select(seedling_id, treatment) %>% distinct()
+
+total_treat = measure %>% 
+  select(seedling_id, seedling_sp, soil_type, neighbor, neighb_sp, neighb_st, pot) %>% distinct() %>% drop_na() %>% left_join(drought_treat)
+
+sort_string_chars <- function(s) {
+  paste(sort(unlist(strsplit(s, ""))), collapse = "")}
+
+pot_df = neighb_pairs %>% 
+  rename(seedling_id = seedling_1) %>% 
+  left_join(trt) %>% 
+  rename(sp1 = seedling_sp, st1 = soil_type) %>% 
+  select(!seedling_id) %>% 
+  rename(seedling_id = seedling_2) %>% 
+  left_join(trt)%>% 
+  rename(sp2 = seedling_sp, st2 = soil_type) %>% 
+  mutate(spp = paste0(sp1, sp2))%>% 
+  mutate(stt = paste0(st1, st2)) %>% 
+  select(pot, spp, stt) %>% 
+  mutate(spp = map_chr(spp, sort_string_chars)) %>% #alphabetize the combo to minimize different uniques
+  mutate(stt = map_chr(stt, sort_string_chars)) %>% 
+  left_join(drought)
+
+living = measure %>% 
+  filter(date == "2022-04-01") %>% 
+  filter(alive ==1)  %>% 
+  select(seedling_id)
+```
+
+
+## Mass and relative growth
+```{r}
+grow_mass = repot_mass %>% 
+  rename(r_shoot = above_dry, r_root = below_dry) %>% 
+  mutate(r_rs = r_root/r_shoot) %>%
+  mutate(r_total = r_root+r_shoot) %>%
+  left_join(harvest_mass %>% 
+              mutate(shoot = shoot +foliar) %>%  select(-foliar) %>% 
+              rename(h_shoot = shoot, h_root = root) %>% 
+              mutate(h_rs = h_root/h_shoot)) %>%
+              mutate(h_total = h_root+h_shoot)%>% 
+  mutate(grow_root = (h_root-r_root)/r_root)%>% 
+  mutate(grow_shoot = (h_shoot-r_shoot)/r_shoot) %>% 
+  mutate(grow_rs = log(h_rs/r_rs)) %>% 
+  mutate(grow_total = ((h_total-r_total)/r_total)) %>%
+  mutate(soil_type = fct_relevel(soil_type, c("P", "Q", "C"))) %>% 
+  left_join(drought_treat) %>% 
+  left_join(total_treat) %>% 
+  left_join(repot_mass %>% 
+              mutate(n_total = above_dry+below_dry) %>% 
+              select(seedling_id, n_total) %>%  rename(neighbor = seedling_id)) %>% 
+  mutate(n_rel = r_total^2/n_total) %>% 
+  filter(seedling_id %in% living$seedling_id)
+
+grow_mass_all = repot_mass %>% 
+  rename(r_shoot = above_dry, r_root = below_dry) %>% 
+  mutate(r_rs = r_root/r_shoot) %>%
+  mutate(r_total = r_root+r_shoot) %>%
+  left_join(harvest_mass %>% 
+              mutate(shoot = shoot +foliar) %>%  select(-foliar) %>% 
+              rename(h_shoot = shoot, h_root = root) %>% 
+              mutate(h_rs = h_root/h_shoot)) %>%
+              mutate(h_total = h_root+h_shoot)%>% 
+  mutate(grow_root = (h_root-r_root)/r_root)%>% 
+  mutate(grow_shoot = (h_shoot-r_shoot)/r_shoot) %>% 
+  mutate(grow_rs = log(h_rs/r_rs)) %>% 
+  mutate(grow_total = ((h_total-r_total)/r_total)) %>%
+  mutate(soil_type = fct_relevel(soil_type, c("P", "Q", "C"))) %>% 
+  left_join(drought_treat) %>% 
+  left_join(total_treat) %>% 
+  left_join(repot_mass %>% 
+              mutate(n_total = above_dry+below_dry) %>% 
+              select(seedling_id, n_total) %>%  rename(neighbor = seedling_id)) %>% 
+  mutate(n_rel = r_total^2/n_total)
+
+rel_size = grow_mass %>% 
+  select(seedling_id, r_total) %>% 
+  left_join(total_treat) %>% 
+  group_by(seedling_sp, soil_type) %>% 
+  mutate(avg_mass = (r_total-mean(r_total, na.rm = T))/sd(r_total, na.rm = T)) %>% 
+  ungroup() %>% 
+  select(seedling_id, avg_mass) %>% 
+  rename(rel_mass = avg_mass)
+
+rel_final = grow_mass %>% 
+  select(seedling_id, h_total) %>% 
+  left_join(total_treat) %>% 
+  group_by(seedling_sp, soil_type, neighb_sp, neighb_st) %>% 
+  mutate(avg_mass = (h_total-mean(h_total, na.rm = T))/sd(h_total, na.rm = T)) %>% 
+  ungroup() %>% 
+  select(seedling_id, avg_mass) %>% 
+  rename(rel_hmass = avg_mass)
+
+n_relsize = rel_size %>% 
+  rename(neighbor = seedling_id, n_relmass = rel_mass)
+```
+
+```{r}
+rel_set = rel_size %>% 
+  left_join(rel_final) %>% 
+  left_join(total_treat) %>% 
+  left_join(n_relsize) %>% 
+  left_join(drought_treat) %>% 
+  left_join(grow_mass) %>% 
+  mutate(rel = rel_mass-n_relmass) 
+
+ndvi = health %>% 
+  group_by(seedling_id) %>% 
+  summarize(ndvi = mean(median_ndvi)) %>% 
+  left_join(total_treat)%>% 
+  mutate(home_rank = case_when(
+    soil_type == seedling_sp & neighb_sp == soil_type & soil_type==neighb_st ~ "Both",
+    soil_type == seedling_sp ~ "Self",
+    seedling_sp == neighb_st ~ "Neighbor",
+    .default = "None"
+  )) %>% 
+  mutate(home_rank = factor(home_rank, levels = c("None", "Neighbor", "Self", "Both"))) %>% 
+  filter(!is.na(seedling_sp)) %>% 
+  filter(seedling_id %in% living$seedling_id)
+```
+
+
+```{r}
+grow_mass
+TukeyHSD(aov(h_total~soil_type*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="P")))
+
+TukeyHSD(aov(h_root~soil_type*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="P") ))
+
+TukeyHSD(aov(h_shoot~soil_type*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="P") ))
+
+TukeyHSD(aov(h_total~soil_type*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="P") ))
+
+TukeyHSD(aov(h_root~soil_type, data = grow_mass %>% 
+               filter(seedling_sp=="P") %>% 
+               filter(treatment == "D")))
+```
+
+```{r}
+lm_p = lm(grow_total~neighb_st*treatment, data = grow_mass%>% 
+               filter(seedling_sp=="P") %>% 
+               filter(soil_type == "P"))
+
+summary(lm_p )
+
+lm_q = lm(grow_total~neighb_st*treatment, data = grow_mass%>% 
+               filter(seedling_sp=="P") %>% 
+               filter(soil_type == "Q"))
+
+summary(lm_q )
+
+lm_c = lm(grow_total~neighb_st*treatment, data = grow_mass%>% 
+               filter(seedling_sp=="P") %>% 
+               filter(soil_type == "C"))
+
+summary(lm_c )
+```
+
+```{r}
+
+library(dendextend)
+library(factoextra)
+
+
+sub_grow = grow_mass %>% 
+  select(seedling_id, h_total) %>% 
+  left_join(total_treat) %>% 
+  select(-seedling_id)
+
+dist_matrix <-dist(sub_grow)
+#Perform hierarchical clustering:
+hc <- hclust(dist_matrix, method = "median")
+#Create and plot the dendrogram:
+dend <- as.dendrogram(hc)
+plot(dend)
+
+dend_colored <- dendextend::color_branches(dend, k = 4)  # k specifies the number of clusters
+plot(dend_colored)
+```
+
+```{r}
+library(ISLR)
+library(rpart)
+library(rpart.plot)
+
+#build the initial decision tree
+tree <- rpart(ndvi ~ soil_type+neighb_sp+neighb_st+treatment, data=ndvi %>%
+                filter(seedling_sp == "P"), control=rpart.control(cp=.0001))
+
+#identify best cp value to use
+best <- tree$cptable[which.min(tree$cptable[,"xerror"]),"CP"]
+
+#produce a pruned tree based on the best cp value
+pruned_tree <- prune(tree, cp=best)
+
+#plot the pruned tree
+prp(pruned_tree)
+
+prp(pruned_tree,
+    faclen=0, #use full names for factor labels
+    extra=1, #display number of observations for each terminal node
+    roundint=T, #don't round to integers in output
+    digits=2) #display 5 decimal places in output
+```
+```{r}
+# Loading package 
+library(caTools) 
+library(randomForest) 
+
+ndvi_sub = ndvi %>% 
+  select(-neighbor, -pot, -home_rank, -seedling_id) %>% 
+  drop_na()
+
+
+# Splitting data in train and test data 
+split <- sample.split(ndvi_sub$ndvi, SplitRatio = 0.7) 
+split 
+
+train <- subset(ndvi_sub, split == "TRUE") 
+test <- subset(ndvi_sub, split == "FALSE") 
+
+# Fitting Random Forest to the train dataset 
+set.seed(120) # Setting seed 
+classifier_RF = randomForest(x = train[-5], 
+							y = train$ndvi, 
+							ntree = 500) 
+
+classifier_RF 
+
+# Predicting the Test set results 
+y_pred = predict(classifier_RF, newdata = test[-5]) 
+
+# Confusion Matrix 
+confusion_mtx = table(test[, 5], y_pred) 
+confusion_mtx
+```
+
+```{r}
+# Selecting relevant columns and dropping NA values
+ndvi_sub <- ndvi %>% 
+  select(-neighbor, -pot, -home_rank, -seedling_id) %>% 
+  drop_na()
+
+# Splitting data into train and test sets
+set.seed(123) # Set seed for reproducibility
+split <- sample.split(ndvi_sub$ndvi, SplitRatio = 0.7)
+
+train <- subset(ndvi_sub, split == TRUE)
+test <- subset(ndvi_sub, split == FALSE)
+
+# Fitting Random Forest to the train dataset
+set.seed(120) # Setting seed
+classifier_RF <- randomForest(x = train %>% select(-ndvi), 
+                              y = train$ndvi, 
+                              ntree = 500)
+
+# View the classifier
+print(classifier_RF)
+
+# Predicting the Test set results
+y_pred <- predict(classifier_RF, newdata = test %>% select(-ndvi))
+
+# Since ndvi seems to be continuous, you should evaluate with metrics like RMSE or MAE instead of a confusion matrix
+# Calculating RMSE
+rmse <- sqrt(mean((test$ndvi - y_pred)^2))
+print(paste("RMSE:", rmse))
+
+# If you need to classify, you may need to bin your ndvi into categories and then create a confusion matrix
+# Example: assuming ndvi values are to be classified as high or low
+test$ndvi_class <- ifelse(test$ndvi > 0.1, "high", "low") # Set appropriate threshold
+y_pred_class <- ifelse(y_pred > 0.1, "high", "low")
+
+# Confusion Matrix
+confusion_mtx <- table(test$ndvi_class, y_pred_class)
+print(confusion_mtx)
+
+# Plotting model 
+plot(classifier_RF) 
+
+# Importance plot 
+importance(classifier_RF) 
+
+# Variable importance plot 
+varImpPlot(classifier_RF) 
+
+```
+
+```{r}
+library(rpart)
+library(rpart.plot)
+library(vip)
+library(rattle)
+
+
+data.length = nrow(grow_mass %>%filter(seedling_sp == "P"))
+
+tree_model <- rpart(ndvi ~ ., data = ndvi_sub %>% filter(seedling_sp=="P"), method = "class")
+
+tree_model <- rpart(ndvi ~ soil_type+neighb_sp+neighb_st+treatment, data=ndvi %>%
+                filter(seedling_sp == "P"), method = "anova",  
+                 control = rpart.control(xval = data.length, minsplit = 2, minbucket = 1, cp = 0))
+
+plotcp(tree_model)
+best <- tree_model$cptable[which.min(tree_model$cptable[,"xerror"]),"CP"]
+
+#produce a pruned tree based on the best cp value
+pruned_tree <- prune(tree_model, cp=best)
+
+# Plot the decision tree
+rpart.plot(pruned_tree, box.palette = "Blues",yesno=2,extra=1,)
+
+
+# Create a variable importance plot
+var_importance <- vip::vip(tree_model, num_features = 10)
+print(var_importance)
+```
+
+```{r}
+data.length = nrow(grow_mass_all %>%filter(seedling_sp == "P"))
+
+
+tree_dataset=grow_mass_all %>%
+                filter(seedling_sp == "P") %>% 
+  select(h_total,h_shoot,h_root,soil_type,neighb_sp,neighb_st,treatment) %>% 
+  rename("SoilType" =soil_type, NeighborSoil = neighb_st, Drought = treatment, NeighborSpecies = neighb_sp) %>% 
+  mutate(Drought = case_when(Drought=="D"~"Yes", .default = "No"))%>% 
+  mutate(SoilType = case_when(SoilType=="C"~"Sterile", SoilType=="Q"~"Oak",SoilType=="P"~"Bigcone"))%>% 
+  mutate(NeighborSoil = case_when(NeighborSoil=="C"~"Sterile", NeighborSoil=="Q"~"Oak",NeighborSoil=="P"~"Bigcone"))%>% 
+  mutate(NeighborSpecies = case_when(NeighborSpecies=="Q"~"Oak",NeighborSpecies=="P"~"Bigcone")) %>% 
+  mutate(rs = h_root/h_shoot)
+
+
+data.length = nrow(tree_dataset)
+
+tree_model <- rpart(h_shoot ~ SoilType+NeighborSpecies+NeighborSoil+Drought, data=tree_dataset, method = "anova", 
+                 control = rpart.control(xval = data.length, minsplit = 2, minbucket = 1, cp = 0.01))
+best <- tree_model$cptable[which.min(tree_model$cptable[,"xerror"]),"CP"]
+pruned_tree <- prune(tree_model, cp=best)
+fancyRpartPlot(tree_model,yesno=2,
+               main = "Bigcone shoot biomass",type = 2,
+               caption="",palette="Greens")
+
+var_importance <- vip::vip(tree_model, num_features = 4, horizontal = F,
+    aesthetics = list(fill = "darkgray", alpha = 0.75))
+var_importance+theme_minimal()
+
+data.length = nrow(tree_dataset)
+
+png(here("figures", "bigcone_total_tree.png"), bg= "transparent", width = 500, height = 500, res = 300,units = "px", pointsize = 5)
+tree_model <- rpart(h_total ~ SoilType+NeighborSpecies+NeighborSoil+Drought, data=tree_dataset, method = "anova", 
+                 control = rpart.control(xval = data.length, minsplit = 2, minbucket = 1, cp = 0.01))
+best <- tree_model$cptable[which.min(tree_model$cptable[,"xerror"]),"CP"]
+pruned_tree <- prune(tree_model, cp=best)
+fancyRpartPlot(tree_model,yesno=2,
+               main = "Bigcone total biomass",type = 2,
+               caption="",palette="Greens")
+dev.off()
+
+var_importance <- vip::vip(tree_model, num_features = 4, horizontal = F,
+    aesthetics = list(fill = "darkgray", alpha = 0.75))
+var_importance+theme_minimal()
+
+png(here("figures", "bigcone_ndvi_tree.png"), bg= "transparent", width = 500, height = 500, res = 300,units = "px", pointsize = 5)
+tree_model <- rpart(ndvi ~ soil_type+neighb_sp+neighb_st+treatment, data=ndvi %>% filter(seedling_sp == "P"), method = "anova", 
+                 control = rpart.control(xval = data.length, minsplit = 2, minbucket = 1, cp = 0.01))
+best <- tree_model$cptable[which.min(tree_model$cptable[,"xerror"]),"CP"]
+pruned_tree <- prune(tree_model, cp=best)
+fancyRpartPlot(tree_model,yesno=2,
+               main = "Bigcone NDVI",type = 2,
+               caption="",palette="Greens")
+dev.off()
+
+var_importance <- vip::vip(tree_model, num_features = 4, horizontal = F,
+    aesthetics = list(fill = "darkgray", alpha = 0.75))
+var_importance+theme_minimal()
+```
+
+```{r}
+data.length = nrow(grow_mass_all %>%filter(seedling_sp == "Q"))
+
+
+tree_dataset=grow_mass_all %>%
+                filter(seedling_sp == "Q") %>% 
+  select(h_total,h_shoot,soil_type,neighb_sp,neighb_st,treatment) %>% 
+  rename("SoilType" =soil_type, NeighborSoil = neighb_st, Drought = treatment, NeighborSpecies = neighb_sp) %>% 
+  mutate(Drought = case_when(Drought=="D"~"Yes", .default = "No"))%>% 
+  mutate(SoilType = case_when(SoilType=="C"~"Sterile", SoilType=="Q"~"Oak",SoilType=="P"~"Bigcone"))%>% 
+  mutate(NeighborSoil = case_when(NeighborSoil=="C"~"Sterile", NeighborSoil=="Q"~"Oak",NeighborSoil=="P"~"Bigcone"))%>% 
+  mutate(NeighborSpecies = case_when(NeighborSpecies=="Q"~"Oak",NeighborSpecies=="P"~"Bigcone"))
+
+
+data.length = nrow(tree_dataset)
+
+tree_model <- rpart(h_shoot ~ SoilType+NeighborSpecies+NeighborSoil+Drought, data=tree_dataset, method = "anova", 
+                 control = rpart.control(xval = data.length, minsplit = 2, minbucket = 1, cp = 0.01))
+best <- tree_model$cptable[which.min(tree_model$cptable[,"xerror"]),"CP"]
+pruned_tree <- prune(tree_model, cp=best)
+fancyRpartPlot(tree_model,yesno=2,
+               main = "Oak shoot biomass",type = 2,
+               caption="",palette="Greens")
+
+var_importance <- vip::vip(tree_model, num_features = 4, horizontal = F,
+    aesthetics = list(fill = "darkgray", alpha = 0.75))
+var_importance+theme_minimal()
+
+data.length = nrow(tree_dataset)
+
+png(here("figures", "oak_total_tree.png"), bg= "transparent", width = 500, height = 500, res = 300,units = "px", pointsize = 5)
+tree_model <- rpart(h_total ~ SoilType+NeighborSpecies+NeighborSoil+Drought, data=tree_dataset, method = "anova", 
+                 control = rpart.control(xval = data.length, minsplit = 2, minbucket = 1, cp = 0.01))
+best <- tree_model$cptable[which.min(tree_model$cptable[,"xerror"]),"CP"]
+pruned_tree <- prune(tree_model, cp=best)
+fancyRpartPlot(tree_model,yesno=2,
+               main = "Oak total biomass",type = 2,
+               caption="",palette="Greens")
+dev.off()
+
+var_importance <- vip::vip(tree_model, num_features = 4, horizontal = F,
+    aesthetics = list(fill = "darkgray", alpha = 0.75))
+var_importance+theme_minimal()
+
+png(here("figures", "oak_ndvi_tree.png"), bg= "transparent", width = 500, height = 500, res = 300,units = "px", pointsize = 5)
+tree_model <- rpart(ndvi ~ soil_type+neighb_sp+neighb_st+treatment, data=ndvi %>% filter(seedling_sp == "Q"), method = "anova", 
+                 control = rpart.control(xval = data.length, minsplit = 2, minbucket = 1, cp = 0.01))
+best <- tree_model$cptable[which.min(tree_model$cptable[,"xerror"]),"CP"]
+pruned_tree <- prune(tree_model, cp=best)
+fancyRpartPlot(tree_model,yesno=2,
+               main = "Oak NDVI",type = 2,
+               caption="",palette="Greens")
+dev.off()
+
+
+var_importance <- vip::vip(tree_model, num_features = 4, horizontal = F,
+    aesthetics = list(fill = "darkgray", alpha = 0.75))
+var_importance+theme_minimal()
+```
+
+```{r}
+
+png(here("figures", "bigcone_decision.png"), bg= "transparent", width = 700, height = 500, res = 300,units = "px", pointsize = 5)
+    
+rpart.plot(tree_model, # middle graph
+extra = 1, # show fitted class, probs, percentages
+box.palette = "-BuRd", # color scheme
+branch.lty = 1, # dotted branch lines
+shadow.col = NA, # shadows under the node boxes
+nn = TRUE) # display the node numbers
+
+dev.off()
+
+
+# Plot the decision tree
+rpart.plot(pruned_tree, box.palette = "Blues",yesno=2,extra=1,)
+var_importance <- vip::vip(tree_model, num_features = 10, horizontal = F,
+    aesthetics = list(fill = "darkgray", alpha = 0.75))
+
+var_importance+theme_minimal()
+
+
+```
+
+
+
+
+## Survival figures 
+```{r}
+surviving = measure %>% 
+  filter(date == "2023-03-01") %>% 
+  mutate(home_rank = case_when(
+    soil_type == seedling_sp  & soil_type==neighb_st ~ "Both",
+    soil_type == "C" & soil_type==neighb_st ~ "Sterile",
+    soil_type == seedling_sp ~ "Self",
+    seedling_sp == neighb_st ~ "Neighbor",
+    .default = "None"
+  ))%>% 
+  mutate(home_rank = factor(home_rank, levels = c("Sterile", "None", "Neighbor", "Self", "Both"))) %>% 
+  group_by(seedling_sp, home_rank, treatment, alive) %>% 
+  summarize(count =n())
+
+surv_wide = surviving %>% pivot_wider(names_from = alive, values_from = count, names_prefix = "alive_") %>% 
+  mutate(alive_1 = case_when(is.na(alive_1) ~0, .default = alive_1)) %>% 
+  mutate(alive_0 = case_when(is.na(alive_0) ~0, .default = alive_0))%>% 
+  mutate(survival = alive_1/(alive_0+alive_1)) 
+  
+
+ggplot(surv_wide, aes(x = home_rank, y = survival, fill = treatment))+
+  geom_bar(stat = "identity", position = position_dodge())+facet_wrap(~seedling_sp)+gg_droughtfill
+
+
+all_trt = all_growth%>% 
+  mutate(home_rank = case_when(
+    soil_type == seedling_sp  & soil_type==neighb_st ~ "Both",
+    soil_type == "C" & soil_type==neighb_st ~ "Sterile",
+    soil_type == seedling_sp ~ "Self",
+    seedling_sp == neighb_st ~ "Neighbor",
+    .default = "None"
+  ))%>% 
+  mutate(home_rank = factor(home_rank, levels = c("Sterile", "None", "Neighbor", "Self", "Both")))
+
+ggplot(all_trt, aes(x = home_rank, y = h_total, fill = treatment))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_droughtfill
+
+ggplot(all_trt, aes(x = home_rank, y = h_shoot, fill = treatment))+
+  geom_boxplot(outlier.shape = NA)+facet_grid(rows = vars(seedling_sp), cols = vars(neighb_sp), scales = "free")+gg_droughtfill
+
+ggplot(all_trt, aes(x = home_rank, y = h_shoot, fill = neighb_sp))+
+  geom_boxplot(outlier.shape = NA)+facet_grid(rows = vars(seedling_sp), cols = vars(treatment), scales = "free")
+```
+
+```{r}
+surviving = measure %>% 
+  filter(date == "2023-03-01") %>% 
+  mutate(home_rank = case_when(
+    soil_type == seedling_sp  & soil_type==neighb_st ~ "Both",
+    soil_type == "C" & soil_type==neighb_st ~ "Sterile",
+    soil_type == seedling_sp ~ "Self",
+    seedling_sp == neighb_st ~ "Neighbor",
+    .default = "None"
+  ))%>% 
+  mutate(home_rank = factor(home_rank, levels = c("Sterile", "None", "Neighbor", "Self", "Both"))) %>% 
+  group_by(seedling_sp, home_rank, treatment, alive, neighb_sp) %>% 
+  summarize(count =n())%>% 
+  mutate(nsp_long = case_when(
+  neighb_sp == "P"~ "n. Bigcone",
+  neighb_sp == "Q"~ "n. Oak"
+  ))
+
+surv_wide = surviving %>% pivot_wider(names_from = alive, values_from = count, names_prefix = "alive_") %>% 
+  mutate(alive_1 = case_when(is.na(alive_1) ~0, .default = alive_1)) %>% 
+  mutate(alive_0 = case_when(is.na(alive_0) ~0, .default = alive_0)) %>% 
+  mutate(survival = alive_1/(alive_0+alive_1)) 
+  
+
+ggplot(surv_wide, aes(x = home_rank, y = survival, fill = treatment))+
+  geom_bar(stat = "identity", position = position_dodge())+facet_wrap(seedling_sp~nsp_long)+gg_droughtfill
+```
+
+
+Boosting
+```{r}
+library(xgboost)
+library(caret)                        
+
+data = grow_mass_all %>%filter(seedling_sp == "P")
+```
+
+```{r}
+# Install and load necessary packages
+library(lightgbm)
+
+# Load your data
+data(iris)
+label <- as.numeric(iris$Species) - 1
+data <- as.matrix(iris[, -5])
+
+# Create a LightGBM dataset
+dtrain <- lgb.Dataset(data, label = label)
+
+# Set parameters
+params <- list(objective = "multiclass",
+               metric = "multi_logloss",
+               num_class = 3)
+
+# Perform cross-validation
+cv <- lgb.cv(params = params,
+             data = dtrain,
+             nfold = 5,        # 5-fold cross-validation
+             nrounds = 100,    # Number of boosting rounds
+             verbose = 1)
+
+# The cv object contains the cross-validation results
+print(cv)
+
+
+final_model <- lgb.train(params = params,
+                         data = dtrain,
+                         nrounds = cv$best_iter,
+                         verbose = 1)
+
+final_model
+```
+
+```{r}
+library(dismo)
+
+gbm_data = grow_mass_all %>%filter(seedling_sp == "P") %>% 
+  dplyr::select(h_total, soil_type, neighb_sp, neighb_st, treatment) %>% 
+  drop_na() %>% 
+  mutate(h_total = as.numeric(h_total)) %>% 
+  mutate(soil_type = as.factor(soil_type))%>% 
+  mutate(neighb_sp = as.factor(neighb_sp))%>% 
+  mutate(neighb_st = as.factor(neighb_st))%>% 
+  mutate(treatment = as.factor(treatment))
+
+
+gbm_model = gbm.step(data = data.frame(gbm_data), gbm.x = 2:5, gbm.y = 1, family = "gaussian", tree.complexity = 5,
+         learning.rate = 0.0005, bag.fraction = 0.5, step.size = 25)
+names(gbm_model)
+gbm_model$interaction.depth
+summary(gbm_model)
+gbm_model$self.statistics
+gbm_model$cv.statistics
+```
+
+
+```{r}
+gbm_model_tc2 = gbm.step(data = data.frame(gbm_data), gbm.x = 2:5, gbm.y = 1, family = "gaussian", tree.complexity = 2,
+         learning.rate = 0.0005, bag.fraction = 0.5, step.size = 25)
+
+gbm_model_tc3 = gbm.step(data = data.frame(gbm_data), gbm.x = 2:5, gbm.y = 1, family = "gaussian", tree.complexity = 3,
+         learning.rate = 0.0005, bag.fraction = 0.5, step.size = 25)
+
+gbm_model_tc4 = gbm.step(data = data.frame(gbm_data), gbm.x = 2:5, gbm.y = 1, family = "gaussian", tree.complexity = 4,
+         learning.rate = 0.0005, bag.fraction = 0.5, step.size = 25)
+
+gbm_model_tc5 = gbm.step(data = data.frame(gbm_data), gbm.x = 2:5, gbm.y = 1, family = "gaussian", tree.complexity = 5,
+         learning.rate = 0.0005, bag.fraction = 0.5, step.size = 25)
+```
+
+
+```{r}
+gbm_data_ptot = grow_mass_all %>%filter(seedling_sp == "P") %>% 
+  dplyr::select(h_total, soil_type, neighb_sp, neighb_st, treatment) %>% 
+  drop_na() %>% 
+  mutate(h_total = as.numeric(h_total)) %>% 
+  mutate(soil_type = as.factor(soil_type))%>% 
+  mutate(neighb_sp = as.factor(neighb_sp))%>% 
+  mutate(neighb_st = as.factor(neighb_st))%>% 
+  mutate(treatment = as.factor(treatment))
+
+gbm_data_qtot = grow_mass_all %>%filter(seedling_sp == "Q") %>% 
+  dplyr::select(h_total, soil_type, neighb_sp, neighb_st, treatment) %>% 
+  drop_na() %>% 
+  mutate(h_total = as.numeric(h_total)) %>% 
+  mutate(soil_type = as.factor(soil_type))%>% 
+  mutate(neighb_sp = as.factor(neighb_sp))%>% 
+  mutate(neighb_st = as.factor(neighb_st))%>% 
+  mutate(treatment = as.factor(treatment))
+
+gbm_data_psht = grow_mass_all %>%filter(seedling_sp == "P") %>% 
+  dplyr::select(h_shoot, soil_type, neighb_sp, neighb_st, treatment) %>% 
+  drop_na() %>% 
+  mutate(h_shoot = as.numeric(h_shoot)) %>% 
+  mutate(soil_type = as.factor(soil_type))%>% 
+  mutate(neighb_sp = as.factor(neighb_sp))%>% 
+  mutate(neighb_st = as.factor(neighb_st))%>% 
+  mutate(treatment = as.factor(treatment))
+
+gbm_data_qsht = grow_mass_all %>%filter(seedling_sp == "Q") %>% 
+  dplyr::select(h_shoot, soil_type, neighb_sp, neighb_st, treatment) %>% 
+  drop_na() %>% 
+  mutate(h_shoot = as.numeric(h_shoot)) %>% 
+  mutate(soil_type = as.factor(soil_type))%>% 
+  mutate(neighb_sp = as.factor(neighb_sp))%>% 
+  mutate(neighb_st = as.factor(neighb_st))%>% 
+  mutate(treatment = as.factor(treatment))
+
+
+tc_set = seq(2,6, length.out = 5)
+lr_set = seq(0.001, 0.0001, length.out = 5)
+bg_set = seq(0.2, 0.8, , length.out = 5)
+
+gbm_set_ptot = tibble(expand_grid(tc_set, lr_set, bg_set)) %>% 
+  mutate(cv_corr = 0)%>% 
+  mutate(r2 = 0)%>% 
+  mutate(dev_exp = 0)%>% 
+  mutate(oob_error = 0)%>% 
+  mutate(seedling_sp = "P")%>% 
+  mutate(compartment = "total")
+
+gbm_set_qtot = tibble(expand_grid(tc_set, lr_set, bg_set)) %>% 
+  mutate(cv_corr = 0)%>% 
+  mutate(r2 = 0)%>% 
+  mutate(dev_exp = 0)%>% 
+  mutate(oob_error = 0)%>% 
+  mutate(seedling_sp = "Q")%>% 
+  mutate(compartment = "total")
+
+gbm_set_psht = tibble(expand_grid(tc_set, lr_set, bg_set)) %>% 
+  mutate(cv_corr = 0)%>% 
+  mutate(r2 = 0)%>% 
+  mutate(dev_exp = 0)%>% 
+  mutate(oob_error = 0)%>% 
+  mutate(seedling_sp = "P")%>% 
+  mutate(compartment = "shoot")
+
+gbm_set_qsht = tibble(expand_grid(tc_set, lr_set, bg_set)) %>% 
+  mutate(cv_corr = 0) %>% 
+  mutate(r2 = 0) %>% 
+  mutate(dev_exp = 0)%>% 
+  mutate(oob_error = 0)%>% 
+  mutate(seedling_sp = "Q")%>% 
+  mutate(compartment = "shoot")
+
+
+for(i in 1:length(gbm_set$bg_set)){
+  gbm_model_holding = gbm.step(data = data.frame(gbm_data_ptot), gbm.x = 2:5, gbm.y = 1, family = "gaussian", step.size = 25,
+                               learning.rate = gbm_set_ptot$lr_set[i], bag.fraction = gbm_set_ptot$bg_set[i], tree.complexity = gbm_set_ptot$tc_set[i]
+  )
+  gbm_set_ptot$cv_corr[i] <- gbm_model_holding$cv.statistics$correlation.mean
+  gbm_set_ptot$r2[i] <- gbm_model_holding$self.statistics$correlation
+  gmb_set_ptot$dev_exp[i] <- gbm_model_holding$self.statistics$deviance
+  gmb_set_ptot$oob_error[i] <- gbm_model_holding$self.statistics$cv.statistics$deviance.mean
+
+  
+  # gbm_model_holding = gbm.step(data = data.frame(gbm_data_qtot), gbm.x = 2:5, gbm.y = 1, family = "gaussian", step.size = 25,
+  #                              learning.rate = gbm_set_qtot$lr_set[i], bag.fraction = gbm_set_qtot$bg_set[i], tree.complexity = gbm_set_qtot$tc_set[i]
+  # )
+  # gbm_set_qtot$cv_corr[i] <- gbm_model_holding$cv.statistics$correlation.mean
+  
+  gbm_model_holding = gbm.step(data = data.frame(gbm_data_psht), gbm.x = 2:5, gbm.y = 1, family = "gaussian", step.size = 25,
+                               learning.rate = gbm_set_psht$lr_set[i], bag.fraction = gbm_set_psht$bg_set[i], tree.complexity = gbm_set_psht$tc_set[i]
+  )
+  gbm_set_psht$cv_corr[i] <- gbm_model_holding$cv.statistics$correlation.mean
+  gbm_set_psht$r2[i] <- gbm_model$self.statistics$correlation
+  gmb_set_psht$dev_exp[i] <- gbm_model_holding$self.statistics$deviance
+  gmb_set_psht$oob_error[i] <- gbm_model_holding$self.statistics$cv.statistics$deviance.mean
+
+
+  gbm_model_holding = gbm.step(data = data.frame(gbm_data_qsht), gbm.x = 2:5, gbm.y = 1, family = "gaussian", step.size = 25,
+                               learning.rate = gbm_set_qsht$lr_set[i], bag.fraction = gbm_set_qsht$bg_set[i], tree.complexity = gbm_set_qsht$tc_set[i]
+  )
+  gbm_set_qsht$cv_corr[i] <- gbm_model_holding$cv.statistics$correlation.mean
+  gbm_set_qsht$r2[i] <- gbm_model$self.statistics$correlation
+  gmb_set_qsht$dev_exp <- gbm_model_holding$self.statistics$deviance
+  gmb_set_qsht$dev_exp[i] <- gbm_model_holding$self.statistics$deviance
+  gmb_set_qsht$oob_error[i] <- gbm_model_holding$self.statistics$cv.statistics$deviance.mean
+}
+
+mod_inq = bind_rows(gbm_set_ptot, gbm_set_qtot, gbm_set_psht, gbm_set_qsht)
+```
+
+```{r}
+gbm_data_ptot = grow_mass_all %>%filter(seedling_sp == "P") %>% 
+  dplyr::select(h_total, soil_type, neighb_sp, neighb_st, treatment) %>% 
+  drop_na() %>% 
+  mutate(h_total = as.numeric(h_total)) %>% 
+  mutate(soil_type = as.factor(soil_type))%>% 
+  mutate(neighb_sp = as.factor(neighb_sp))%>% 
+  mutate(neighb_st = as.factor(neighb_st))%>% 
+  mutate(treatment = as.factor(treatment))
+
+tc_set = seq(1,3, length.out = 3) ##lower has lower r2 but higher deviance explained and higher cv-corr
+lr_set = seq(0.001, 0.0001, length.out = 3) ##no strong effect observed...
+bg_set = seq(0.5, 0.75, , length.out = 3) ##not a strong effect. landing on accepted range from Elith et al 2008
+
+gbm_set_ptot = tibble(expand_grid(tc_set, lr_set, bg_set)) %>% 
+  mutate(cv_corr = 0)%>% 
+  mutate(r2 = 0)%>% 
+  mutate(dev_exp = 0)%>% 
+  mutate(seedling_sp = "P")%>% 
+  mutate(compartment = "total")
+
+for(i in 1:length(gbm_set$bg_set)){
+  gbm_model_holding = gbm.step(data = data.frame(gbm_data_ptot), gbm.x = 2:5, gbm.y = 1, family = "gaussian", step.size = 25,
+                               learning.rate = gbm_set_ptot$lr_set[i], bag.fraction = gbm_set_ptot$bg_set[i], tree.complexity = gbm_set_ptot$tc_set[i]
+  )
+  gbm_set_ptot$cv_corr[i] <- gbm_model_holding$cv.statistics$correlation.mean
+  gbm_set_ptot$r2[i] <- gbm_model_holding$self.statistics$correlation
+  gbm_set_ptot$dev_exp[i] <- (gbm_model_holding$self.statistics$mean.null-gbm_model_holding$cv.statistics$deviance.mean)/gbm_model_holding$self.statistics$mean.null
+
+}
+```
+
+
+```{r}
+ggplot(gbm_set_ptot, aes(x = as.factor(tc_set), y = r2))+
+  geom_boxplot()
+
+ggplot(gbm_set_ptot, aes(x = as.factor(lr_set), y = r2))+
+  geom_boxplot()
+
+ggplot(gbm_set_ptot, aes(x = as.factor(bg_set), y = r2))+
+  geom_boxplot()
+
+ggplot(gbm_set_ptot, aes(x = as.factor(tc_set), y = dev_exp))+
+  geom_boxplot()
+
+ggplot(gbm_set_ptot, aes(x = as.factor(lr_set), y = dev_exp))+
+  geom_boxplot()
+
+ggplot(gbm_set_ptot, aes(x = as.factor(bg_set), y = dev_exp))+
+  geom_boxplot()
+
+ggplot(gbm_set_ptot, aes(x = as.factor(tc_set), y = cv_corr))+
+  geom_boxplot()
+
+ggplot(gbm_set_ptot, aes(x = as.factor(lr_set), y = cv_corr))+
+  geom_boxplot()
+
+ggplot(gbm_set_ptot, aes(x = as.factor(bg_set), y = cv_corr))+
+  geom_boxplot()
+
+
+```
+
+
+best model for total P biomass 
+tc = 2
+bag = 0.6
+lr = 0.0005
+
+
+## Best models
+```{r}
+gbm_data_ptot = grow_mass_all %>%filter(seedling_sp == "P") %>% 
+  dplyr::select(h_total, soil_type, neighb_sp, neighb_st, treatment) %>% 
+  drop_na() %>% 
+  mutate(h_total = as.numeric(h_total)) %>% 
+  mutate(soil_type = as.factor(soil_type))%>% 
+  mutate(neighb_sp = as.factor(neighb_sp))%>% 
+  mutate(neighb_st = as.factor(neighb_st))%>% 
+  mutate(treatment = as.factor(treatment))
+
+best_p_total =  gbm.step(data = data.frame(gbm_data_ptot), gbm.x = 2:5, gbm.y = 1, family = "gaussian", step.size = 25,
+                               learning.rate = 0.0005, bag.fraction = 0.6, tree.complexity = 2)
+
+gbm.plot(best_p_total)
+interactions = gbm.interactions(best_p_total)
+
+# Find interactions in the gbm model:
+find.int <- gbm.interactions( best_p_total)
+find.int$interactions
+find.int$rank.list
+interactions$gbm.call
+
+interactions$interactions
+
+gbm.perspec( best_p_total, 2, 1,
+            x.label = "USRainDays",
+            y.label = "SegSumT", 
+            z.label = "Fitted values",
+            z.range=c(0,0.435),
+            col="blue")
+
+best_p_total$cv.statistics$deviance.mean
+```
+
+
+```{r}
+best_p_total =  gbm.step(data = data.frame(gbm_data_ptot), gbm.x = 2:5, gbm.y = 1, family = "gaussian", step.size = 25,
+                               learning.rate = 0.0005, bag.fraction = 0.6, tree.complexity = 2)
+
+gbm.plot(best_p_total)
+interactions = gbm.interactions(best_p_total)
+
+best_inf = tibble(best_p_total$contributions) %>% 
+  mutate(var = fct_reorder(var, rel.inf))
+
+ggplot(best_inf, aes(x = var, y = rel.inf, fill = rel.inf))+
+  geom_bar(stat= "identity")+labs(x = "Predictor", y="Relative Influence")+
+  scale_fill_continuous(name = "Relative \nInfluence")+theme_minimal()
+
+gbm.predict()
+```
+
+
+```{r}
+library(patchwork)
+best_st <- tibble(gbm::plot.gbm(best_p_total, i.var = 1, return.grid = TRUE))
+best_nsp <- tibble(gbm::plot.gbm(best_p_total, i.var = 2, return.grid = TRUE))
+best_nst <- tibble(gbm::plot.gbm(best_p_total, i.var =3, return.grid = TRUE))
+best_trt <- tibble(gbm::plot.gbm(best_p_total, i.var =4, return.grid = TRUE))
+
+bst_plot = ggplot(best_st, aes(x = soil_type, y = y, fill = soil_type))+geom_bar(stat="identity")+labs(x = "Soil type", y = "Predicted mass")+gg_soilfill+
+  theme(legend.position = "none")
+bnsp_plot = ggplot(best_nsp, aes(x = neighb_sp, y = y, fill = neighb_sp))+geom_bar(stat="identity")+labs(x = "Neighbor species", y = "Predicted mass")+gg_nspfill+
+  theme(legend.position = "none")
+bnst_plot = ggplot(best_nst, aes(x = neighb_st, y = y, fill = neighb_st))+geom_bar(stat="identity")+labs(x = "Neighbor soil type", y = "Predicted mass")+gg_nsoilfill+
+  theme(legend.position = "none")
+btrt_plot = ggplot(best_trt, aes(x = treatment, y = y, fill = treatment))+geom_bar(stat="identity")+labs(x = "Watering treatment", y = "Predicted mass")+gg_droughtfill+
+  theme(legend.position = "none")
+
+(bst_plot+btrt_plot)/(bnsp_plot+bnst_plot)
+
+```
+```{r}
+
+
+simple_set = gbm_data_ptot %>% 
+  group_by(soil_type,neighb_st) %>% 
+  summarize(n = n()) %>% 
+  select(-n) %>% mutate(neighb_sp = "P") %>% mutate(treatment = "D")
+
+pred_mass = gbm::predict.gbm(best_p_total, simple_set)
+
+pred_set = simple_set %>% 
+  ungroup() %>% 
+  mutate(h_total = pred_mass)
+
+ggplot(pred_set, aes(x = soil_type, y = neighb_st, fill = h_total))+
+  geom_tile()
+
+ggplot(gbm_data_ptot %>% filter(neighb_sp == "P") %>% filter(treatment == "C"), aes(x = soil_type, y = neighb_st, fill = h_total))+
+  geom_tile()
+```
+
+
+
+
+```{r}
+gbm_model_tc2$cv.statistics$correlation.mean
+gbm_model_tc3$cv.statistics$correlation.mean
+gbm_model_tc4$cv.statistics$correlation.mean
+gbm_model_tc5$cv.statistics$correlation.mean
+
+
+
+```
+
+```{r}
+install.packages('palmerpenguins')
+library(palmerpenguins)
+library(tidyverse)
+data(penguins)
+ex_df = penguins %>% 
+  select(1,2,7,6) %>% 
+  mutate(body_mass_g = as.numeric(body_mass_g)) %>% 
+  drop_na()
+  
+ex_gbm = gbm.step(data = data.frame(ex_df), gbm.x = 1:3, gbm.y = 4, family = "gaussian", step.size = 1,
+                               learning.rate = 0.0005, bag.fraction = 0.6, tree.complexity = 2)
+
+gbm.perspec(ex_gbm, x = 1, y= 2)
+```
+
+```{r}
+devtools::install_github("JBjouffray/ggBRT") # will take several minutes to install
+
+```
+
+
+
+

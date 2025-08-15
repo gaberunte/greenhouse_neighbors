@@ -1,0 +1,420 @@
+---
+title: "colonization questions"
+author: "Gabe Runte"
+date: "2024-09-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(here)
+library(janitor)
+library(RColorBrewer)
+library(multcompView)
+library(patchwork)
+library(tidyverse)
+
+source(here("src", "colors.R"))
+```
+
+## Read in files
+```{r, message = F}
+measure = read_csv(here("data", "analysis/size_master.csv"))
+harvest = read_csv(here("data", "analysis/harvest_metrics.csv")) 
+health = read_csv(here("data", "analysis/ndvi_data.csv"))
+harvest_tips = read_csv(here("data", "analysis/harvest_roottips - all.csv")) %>% 
+  filter(!is.na(seedling_id))
+repot_tips = read_csv(here("data", "repotting/ghecto_repotting_root_pulling_data.csv"))
+harvest_mass = read_csv(here("data", "harvest", "harvest_biomass_wideclean.csv"))
+image_data = read_csv(here("data", "wide_final_seedling_area.csv"))
+repot_mass = read_csv(here("data", "repotting", "repotting_drymass_fitted.csv"))
+neighb_pairs = read_csv(here("data", "design", "ghecto_neighbor_pairs.csv"))
+trt = read_csv(here("data", "design", "seedling_treatments.csv"))
+drought = read_csv(here("data", "design", "drought_assignments_bypot.csv")) %>% select(1,3)
+harvest_comm = read_csv( here("data", "harvest", "harvest_community_matrix_scaled.csv"))
+
+pressure = read_csv(here("data/harvest", "pressure_bomb - Sheet1.csv")) %>% select(1:4) %>%  mutate(time = tolower(time))
+sapwood = read_csv(here("data/harvest", "harvest_sapwood.csv"))
+
+repot_fungi = read_csv(here("data/repotting", "repot_community_matrix_scaled.csv"))
+```
+
+### Edit/compile some files
+```{r, warning = F, message=F}
+colonization = repot_tips %>% 
+  mutate(repot_col = case_when(
+    colonization_numerator == 0 ~ 0,
+    .default = colonization_numerator/colonization_denominator)) %>% 
+  select(seedling_id, repot_col) %>% 
+  left_join(harvest_tips %>% 
+              mutate(harvest_col = case_when(
+                    colonized == 0 ~ 0,
+                    .default =colonized/(colonized+uncolonized))) %>% 
+              select(seedling_id, harvest_col) %>% 
+              mutate(seedling_id = as.numeric(seedling_id)))
+
+n_col = colonization %>% 
+  rename(neighbor = seedling_id, nr_col = repot_col, nh_col = harvest_col) 
+
+drought_treat = health %>% 
+  select(seedling_id, treatment) %>% distinct()
+
+total_treat = measure %>% 
+  select(seedling_id, seedling_sp, soil_type, neighbor, neighb_sp, neighb_st, pot) %>% distinct() %>% drop_na() %>% 
+  left_join(drought_treat)
+
+sort_string_chars <- function(s) {
+  paste(sort(unlist(strsplit(s, ""))), collapse = "")}
+
+pot_df = neighb_pairs %>% 
+  rename(seedling_id = seedling_1) %>% 
+  left_join(trt) %>% 
+  rename(sp1 = seedling_sp, st1 = soil_type) %>% 
+  select(!seedling_id) %>% 
+  rename(seedling_id = seedling_2) %>% 
+  left_join(trt)%>% 
+  rename(sp2 = seedling_sp, st2 = soil_type) %>% 
+  mutate(spp = paste0(sp1, sp2))%>% 
+  mutate(stt = paste0(st1, st2)) %>% 
+  select(pot, spp, stt) %>% 
+  mutate(spp = map_chr(spp, sort_string_chars)) %>% #alphabetize the combo to minimize different uniques
+  mutate(stt = map_chr(stt, sort_string_chars)) %>% 
+  left_join(drought)
+
+living = measure %>% 
+  filter(date == "2023-03-01") %>% 
+  filter(alive ==1)  %>% 
+  select(seedling_id)
+
+grow_mass = repot_mass %>% 
+  rename(r_shoot = above_dry, r_root = below_dry) %>% 
+  mutate(r_rs = r_root/r_shoot) %>%
+  mutate(r_total = r_root+r_shoot) %>%
+  left_join(harvest_mass %>% 
+              mutate(shoot = shoot +foliar) %>%  select(-foliar) %>% 
+              rename(h_shoot = shoot, h_root = root) %>% 
+              mutate(h_rs = h_root/h_shoot)) %>%
+              mutate(h_total = h_root+h_shoot)%>% 
+  mutate(grow_root = (h_root-r_root)/r_root)%>% 
+  mutate(grow_shoot = (h_shoot-r_shoot)/r_shoot) %>% 
+  mutate(grow_rs = log(h_rs/r_rs)) %>% 
+  mutate(grow_total = ((h_total-r_total)/r_total)) %>%
+  mutate(soil_type = fct_relevel(soil_type, c("P", "Q", "C"))) %>% 
+  left_join(drought_treat) %>% 
+  left_join(total_treat) %>% 
+  left_join(repot_mass %>% 
+              mutate(n_total = above_dry+below_dry) %>% 
+              select(seedling_id, n_total) %>%  rename(neighbor = seedling_id)) %>% 
+  mutate(n_rel = r_total/n_total) %>% 
+  filter(seedling_id %in% living$seedling_id)
+
+ndvi = health %>% 
+  group_by(seedling_id) %>% 
+  summarize(ndvi_change = max(mean_ndvi)-min(mean_ndvi),
+            ndvi = mean(mean_ndvi), 
+            min_ndvi = min(mean_ndvi)) %>% 
+  left_join(total_treat)%>% 
+  mutate(home_rank = case_when(
+    soil_type == seedling_sp & neighb_sp == soil_type & soil_type==neighb_st ~ "Both",
+    soil_type == seedling_sp ~ "Self",
+    seedling_sp == neighb_st ~ "Neighbor",
+    .default = "None"
+  )) %>% 
+  mutate(home_rank = factor(home_rank, levels = c("None", "Neighbor", "Self", "Both"))) %>% 
+  filter(!is.na(seedling_sp)) %>% 
+  filter(seedling_id %in% living$seedling_id)
+```
+
+```{r}
+col_df = colonization %>% 
+  left_join(total_treat) %>% 
+  mutate(repot_col = case_when(
+    soil_type == "C" ~ 0, #expanding colonization set here 
+    .default = repot_col)) %>% 
+  filter(repot_col <1) %>% 
+  filter(seedling_id %in% living$seedling_id)
+
+col_growth = col_df %>% 
+  drop_na() %>% 
+  left_join(grow_mass) %>% 
+  left_join(ndvi) %>% 
+  filter(treatment == "C")%>% 
+  left_join(n_col)%>% 
+  mutate(tot_rcol = repot_col+nr_col) %>% 
+  mutate(rel_col = repot_col/(nr_col+repot_col))%>% 
+  left_join(repot_fungi)
+
+col_growth_all = col_df %>% 
+  drop_na() %>% 
+  left_join(grow_mass) %>% 
+  left_join(ndvi) %>% 
+  filter(h_rs<15) %>% 
+  mutate(repot_fungi = repot_col >0)%>% 
+  left_join(n_col) %>% 
+  mutate(tot_rcol = repot_col+nr_col) %>% 
+  mutate(rel_col = repot_col/(nr_col+repot_col))%>% 
+  left_join(repot_fungi)
+```
+
+```{r}
+# does colonization at repotting predict repoting size?
+ggplot(col_growth_all %>% filter(repot_col>0), aes(x = repot_col, y = r_total, col = soil_type))+geom_smooth(method = "lm", se = F)+geom_point()+facet_wrap(~seedling_sp, scales = "free")
+
+ggplot(col_growth_all %>% filter(repot_col>0), aes(x = repot_col, y = r_root, col = soil_type))+geom_smooth(method = "lm", se = F)+geom_point()+facet_wrap(~seedling_sp, scales = "free")
+
+ggplot(col_growth_all %>% filter(repot_col>0), aes(x = repot_col, y = r_shoot, col = soil_type))+geom_smooth(method = "lm", se = F)+geom_point()+facet_wrap(~seedling_sp, scales = "free")
+
+ggplot(col_growth_all %>% filter(repot_col>0), aes(x = repot_col, y = r_rs, col = soil_type))+geom_smooth(method = "lm", se = F)+geom_point()+facet_wrap(~seedling_sp, scales = "free")
+
+
+summary(lm(r_total~repot_col, data = col_growth_all %>% filter(repot_col>0) %>% filter(seedling_sp == "P")))
+summary(lm(r_total~repot_col, data = col_growth_all %>% filter(repot_col>0) %>% filter(seedling_sp == "Q")))
+
+
+ggplot(col_growth_all, aes(soil_type, y = r_rs, fill = repot_fungi))+
+  geom_boxplot()+facet_wrap(~seedling_sp, scales = "free")+ geom_point(position = position_jitterdodge(jitter.width = 0.15))
+  
+```
+
+```{r}
+# does colonization at repotting predict growth?
+ggplot(col_growth %>% filter(repot_col>0), aes(x = repot_col, y = grow_total, col = soil_type))+geom_smooth(method = "lm", se = F)+geom_point()+facet_wrap(~seedling_sp, scales = "free")
+
+ggplot(col_growth %>% filter(repot_col>0), aes(x = repot_col, y = grow_root, col = soil_type))+geom_smooth(method = "lm", se = F)+geom_point()+facet_wrap(~seedling_sp, scales = "free")
+
+ggplot(col_growth %>% filter(repot_col>0), aes(x = repot_col, y = grow_shoot, col = soil_type))+geom_smooth(method = "lm", se = F)+geom_point()+facet_wrap(~seedling_sp, scales = "free")
+
+ggplot(col_growth , aes(x = tot_rcol, y = grow_rs, col = soil_type))+geom_smooth(method = "lm", se = F)+geom_point()+facet_wrap(~seedling_sp, scales = "free")
+
+
+summary(lm(grow_shoot~tot_rcol, data = col_growth_all %>% filter(seedling_sp == "P") %>% filter(treatment == "D")))
+summary(lm(grow_rs~repot_col, data = col_growth_all %>% filter(repot_col>0) %>% filter(seedling_sp == "Q")))
+  
+```
+
+```{r}
+# does colonization at repotting predict growth?
+ggplot(col_growth%>% filter(harvest_col>0), aes(x = harvest_col, y = grow_total, col = soil_type))+geom_smooth(method = "lm", se = F)+geom_point()+facet_wrap(~seedling_sp, scales = "free")
+
+ggplot(col_growth%>% filter(harvest_col>0), aes(x = harvest_col, y = grow_root, col = soil_type))+geom_smooth(method = "lm", se = F)+geom_point()+facet_wrap(~seedling_sp, scales = "free")
+
+ggplot(col_growth%>% filter(harvest_col>0), aes(x = harvest_col, y = grow_shoot, col = soil_type))+geom_smooth(method = "lm", se = F)+geom_point()+facet_wrap(~seedling_sp, scales = "free")
+
+ggplot(col_growth%>% filter(harvest_col>0), aes(x = harvest_col, y = grow_rs, col = soil_type))+geom_smooth(method = "lm", se = F)+
+  geom_point()+facet_wrap(~seedling_sp, scales = "free")
+
+
+summary(lm(grow_total~harvest_col, data = col_growth_all %>% filter(seedling_sp == "P") %>% filter(harvest_col >0)))
+summary(lm(grow_rs~repot_col, data = col_growth_all %>% filter(repot_col>0) %>% filter(seedling_sp == "Q")))
+  
+```
+
+
+
+```{r}
+# does colonization at repotting predict harvest size?
+ggplot(col_growth_all %>% filter(repot_col>0), aes(x = repot_col, y = h_total, col = soil_type))+geom_smooth(method = "lm", se = F)+geom_point()+facet_wrap(~seedling_sp, scales = "free")
+
+ggplot(col_growth_all %>% filter(repot_col>0), aes(x = repot_col, y = h_root, col = soil_type))+geom_smooth(method = "lm", se = F)+geom_point()+facet_wrap(~seedling_sp, scales = "free")
+
+ggplot(col_growth_all %>% filter(repot_col>0), aes(x = repot_col, y = h_shoot, col = soil_type))+geom_smooth(method = "lm", se = F)+geom_point()+facet_wrap(~seedling_sp, scales = "free")
+
+ggplot(col_growth_all %>% filter(repot_col>0), aes(x = repot_col, y = h_rs, col = soil_type))+geom_smooth(method = "lm", se = F)+geom_point()+facet_wrap(~seedling_sp, scales = "free")
+
+
+ggplot(col_growth_all, aes(fill = neighb_st, y = h_rs, x = soil_type)) +
+  geom_boxplot()+facet_grid(~seedling_sp)
+  
+ggplot(col_growth_all, aes(fill = neighb_st, y = h_total, x = soil_type)) +
+  geom_boxplot()+facet_grid(~seedling_sp, scales="free")
+
+ggplot(col_growth_all, aes(fill = neighb_st, y = h_total, x = soil_type)) +
+  geom_boxplot()+facet_grid(~seedling_sp, scales="free")
+```
+
+```{r}
+ggplot(col_growth_all , aes(x = tot_rcol, y = ndvi, col = soil_type))+geom_smooth(method = "lm", se = F)+geom_point()+facet_grid(treatment~seedling_sp, scales = "free")
+
+ggplot(col_growth_all , aes(x = tot_rcol, y = ndvi_change, col = soil_type))+geom_smooth(method = "lm", se = F)+geom_point()+facet_grid(treatment~seedling_sp, scales = "free")
+
+ggplot(col_growth_all , aes(x = tot_rcol, y = min_ndvi, col = soil_type))+geom_smooth(method = "lm", se = F)+geom_point()+facet_grid(treatment~seedling_sp, scales = "free")
+  
+```
+
+```{r}
+ cn_check = grow_mass %>% 
+  left_join(cn_means_adj)
+
+ggplot(cn_check, aes(x = ))
+
+ggplot(cn_check, aes(x = soil_type, y = r_rs/cn_adj, fill = soil_type))+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Repot R:S")+ theme(legend.position = 'none')+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))+facet_wrap(~seedling_sp, scales = "free")
+
+ggplot(cn_check, aes(x = soil_type, y = r_rs, fill = soil_type))+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Repot R:S")+ theme(legend.position = 'none')+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))+facet_wrap(~seedling_sp, scales = "free")
+
+TukeyHSD(aov(r_shoot~soil_type, data = cn_check %>% filter(seedling_sp == "P")))
+TukeyHSD(aov(r_shoot/cn_adj~soil_type, data = cn_check %>% filter(seedling_sp == "P")))
+
+TukeyHSD(aov(r_shoot~soil_type, data = cn_check %>% filter(seedling_sp == "Q")))
+TukeyHSD(aov(r_shoot/cn_adj~soil_type, data = cn_check %>% filter(seedling_sp == "Q")))
+```
+
+```{r}
+colmod = lm(grow_shoot ~ soil_type*neighb_sp*neighb_st*treatment*repot_col, data = col_growth_all %>% filter(seedling_sp == "P"))
+
+col_modselect = MASS::stepAIC(colmod)
+
+summary((col_modselect$call))
+
+bestmodel = eval(col_modselect$call)
+
+summary(bestmodel)
+```
+
+```{r}
+
+# Generate predictions from the best model
+new_data <- col_growth_all %>%
+  mutate(predicted = predict(bestmodel, newdata = col_growth_all))
+
+# Visualization: Interaction between repot_col and neighb_stP
+ggplot(new_data, aes(x = repot_col, y = predicted, color = factor(neighb_st))) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(title = "Effect of repot_col on grow_total by neighb_stP",
+       x = "repot_col",
+       y = "Predicted grow_total") +
+  theme_minimal()
+
+# Visualization: Interaction between repot_col and treatment
+ggplot(new_data, aes(x = repot_col, y = predicted, color = factor(treatment))) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(title = "Effect of repot_col on grow_total by treatment",
+       x = "repot_col",
+       y = "Predicted grow_total") +
+  theme_minimal()
+
+# If you want to visualize a three-way interaction:
+ggplot(new_data, aes(x = repot_col, y = predicted, color = factor(neighb_st))) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  facet_wrap(~treatment) +
+  labs(title = "Effect of repot_col on grow_total by neighb_stP and treatment",
+       x = "repot_col",
+       y = "Predicted grow_total") +
+  theme_minimal()
+
+ggplot(new_data, aes(x = repot_col, y = predicted, color = treatment)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  theme_minimal()
+```
+
+
+```{r}
+
+ggplot(col_growth_all, aes(x = tot_rcol, y = grow_total, col = soil_type))+
+geom_point()+gg_soilcolor+theme_minimal()+facet_wrap(~seedling_sp, scales = "free")+
+  geom_smooth(method = "lm", scales = "free")
+
+
+ggplot(col_growth, aes(x = rel_col, y = grow_total, col = soil_type))+
+geom_point()+gg_soilcolor+theme_minimal()+facet_grid(seedling_sp~neighb_sp, scales = "free")+
+  geom_smooth(method = "lm", scales = "free")
+
+```
+
+ Are diferences within soil conditioning groups 
+```{r}
+
+```
+
+
+Are we able to see better nvdi patterns by dropping the final timepoint? 
+
+```{r}
+ndvi_drop = health %>% 
+  group_by(seedling_id) %>% 
+  summarize(ndvi = mean(mean_ndvi),
+            ndvi_drop = min(mean_ndvi)-max(mean_ndvi), 
+            min_ndvi = min(mean_ndvi)) %>% 
+  left_join(total_treat) %>% drop_na()
+
+ggplot(ndvi_drop, aes(x = soil_type, y = ndvi_drop, fill = treatment))+
+  geom_boxplot()+facet_wrap(~seedling_sp)
+
+ggplot(ndvi_drop, aes(x = soil_type, y = ndvi, fill = treatment))+
+  geom_boxplot()+facet_wrap(~seedling_sp)
+
+
+ggplot(ndvi_drop, aes(x = soil_type, y = min_ndvi, fill = treatment))+
+  geom_boxplot()+facet_wrap(~seedling_sp)
+```
+
+```{r}
+col_liv = col_growth_all %>% 
+  mutate(alive = case_when(
+    seedling_id %in% living$seedling_id ~ "Alive",
+    .default = "Dead"
+  ))
+
+col_liv = colonization %>% 
+  left_join(total_treat)%>% 
+  mutate(alive = case_when(
+    seedling_id %in% living$seedling_id ~ "Alive",
+    .default = "Dead"
+  )) %>% 
+  filter(!is.na(seedling_sp))
+
+
+
+ggplot(col_liv, aes(x = soil_type, y = repot_col, fill = alive))+
+  geom_boxplot()+facet_grid(~seedling_sp)
+```
+
+
+```{r}
+hplot=grow_mass %>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  ))%>% 
+  mutate(nsp_long = case_when(
+    neighb_sp == "P" ~ "N. Bigcone",
+    neighb_sp == "Q" ~ "N. Oak"
+  )) %>% 
+  mutate(pair = paste(sp_long, nsp_long, sep = "\n"))%>% 
+  mutate(trt_long = case_when(
+    treatment == "D" ~ "Drought",
+    treatment == "C" ~ "Watered"
+  )) %>% 
+  filter(!seedling_id %in% c(3128, 3172))
+
+ggplot(hplot, aes(x = pair, y = log(h_rs), fill = soil_type))+
+  geom_boxplot()+facet_grid(soil_type~trt_long)+gg_soilfill
+
+ggplot(hplot %>% filter(seedling_sp == "P"), aes(x = pair, y = log(h_rs), fill = soil_type))+
+  geom_boxplot()+facet_grid(soil_type~trt_long)+gg_soilfill
+
+ggplot(hplot %>% filter(seedling_sp == "Q"), aes(x = pair, y = log(h_rs), fill = soil_type))+
+  geom_boxplot()+facet_grid(soil_type~trt_long)+gg_soilfill
+```
+
+
+```{r}
+ggplot(hplot, aes(x = pair, y = grow_rs, fill = soil_type))+
+  geom_boxplot()+facet_grid(soil_type~trt_long)+gg_soilfill
+
+ggplot(hplot, aes(x = pair, y = h_root, fill = soil_type))+
+  geom_boxplot()+facet_grid(soil_type~trt_long)+gg_soilfill
+
+ggplot(hplot, aes(x = pair, y = h_shoot, fill = soil_type))+
+  geom_boxplot()+facet_grid(soil_type~trt_long)+gg_soilfill
+```
+

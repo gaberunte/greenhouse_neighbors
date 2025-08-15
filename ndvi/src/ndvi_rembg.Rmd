@@ -1,0 +1,202 @@
+---
+title: "NDVI generator"
+author: Aubrey Chuen
+output: html_notebook
+---
+
+```{r, message=FALSE}
+# Load packages
+library(jpeg) #image processing
+library(raster) #image processing
+library(sf) #image processing
+library(doParallel) #Parallelize workflow for speed
+library(here) #file path toolkit
+library(janitor) #data cleanup
+library(tidyverse) #general data wrangling and plotting
+```
+
+The below chunk assesses how to map the clipped 4-layer image back to the unclipped 3-layer image. It turns out that the fourth layer can be discarded. "Preclipped" is before clipping. 
+```{r QUERCUS, warning = FALSE, eval = FALSE}
+photo_path = here("ndvi_photos/calibrated_clipped")
+photo_path_pre = here("ndvi_photos/calibrated")
+files = list.files(photo_path)
+files_pre = list.files(photo_path_pre)
+
+min_color <- 100
+max_color <- 300
+
+# Create a color palette
+colors <- colorRampPalette(c("blue", "red"))(256)
+
+
+aq = stack(paste(photo_path, files[1], sep = "/"))
+bq = brick(aq)
+
+plot(bq[[1]], ylim = c(1200, 1700), xlim = c(1800, 2200), col = colors, breaks = seq(min_color, max_color, length.out = length(colors)))
+plot(bq[[2]], ylim = c(1200, 1700), xlim = c(1800, 2200), col = colors, breaks = seq(min_color, max_color, length.out = length(colors)))
+plot(bq[[3]], ylim = c(1200, 1700), xlim = c(1800, 2200), col = colors, breaks = seq(min_color, max_color, length.out = length(colors)))
+plot(bq[[4]], ylim = c(1200, 1700), xlim = c(1800, 2200), col = colors, breaks = seq(min_color, max_color, length.out = length(colors)))
+
+aq = stack(paste(photo_path_pre, files_pre[1], sep = "/"))
+bq = brick(aq)
+
+plot(bq[[1]], ylim = c(1200, 1700), xlim = c(1800, 2200), col = colors, breaks = seq(min_color, max_color, length.out = length(colors)))
+plot(bq[[2]], ylim = c(1200, 1700), xlim = c(1800, 2200), col = colors, breaks = seq(min_color, max_color, length.out = length(colors)))
+plot(bq[[3]], ylim = c(1200, 1700), xlim = c(1800, 2200), col = colors, breaks = seq(min_color, max_color, length.out = length(colors)))
+```
+
+
+```{r }
+aq = stack(paste(photo_path, files[1], sep = "/"))
+bq = brick(aq)
+ndvi <- (bq[[3]] - bq[[1]]) / (bq[[3]] + bq[[1]])
+mean(ndvi@data@values, na.rm = TRUE)
+median(ndvi@data@values, na.rm = TRUE)
+sd(ndvi@data@values, na.rm = TRUE)
+min(ndvi@data@values, na.rm = TRUE)
+max(ndvi@data@values, na.rm = TRUE)
+
+min_color_ndvi <- -.25
+max_color_ndvi <- .25
+
+# Create a color palette
+color_ndvi <- colorRampPalette(c("yellow", "darkgreen"))(256)
+
+plot(ndvi, col = color_ndvi, breaks = seq(min_color_ndvi, max_color_ndvi, length.out = length(color_ndvi)))
+```
+
+```{r extract ndvi info, warning = FALSE}
+photo_path = here("ndvi_photos/calibrated_clipped")
+clipped_photos = list.files(photo_path)
+
+ndvi_df = tibble(photo = clipped_photos) %>% 
+  mutate(mean_ndvi = NaN, median_ndvi = NaN, sd_ndvi = NaN)
+
+# Keep a progress bar to follow updating success 
+pb = txtProgressBar(min = 0, max = length(clipped_photos), initial = 0) 
+
+for(i in 1:length(clipped_photos)){
+loop_stack = stack(paste(photo_path, clipped_photos[i], sep = "/"))
+loop_brick = brick(loop_stack)
+loop_ndvi <- (loop_brick[[3]] - loop_brick[[1]]) / (loop_brick[[3]] + loop_brick[[1]])
+ndvi_df$mean_ndvi[i]<- mean(loop_ndvi@data@values, na.rm = TRUE)
+ndvi_df$median_ndvi[i]<- median(loop_ndvi@data@values, na.rm = TRUE)
+ndvi_df$sd_ndvi[i]<- sd(loop_ndvi@data@values, na.rm = TRUE)
+
+# setTxtProgressBar(pb,i)
+# close(pb)
+}
+
+photo_map = read_csv(here("data/MAPIR Photos to ID - total.csv")) %>% 
+  rename(photo = photo_ID)%>% 
+  mutate(photo = str_sub(photo, end = 16))
+
+ndvi_meta = ndvi_df %>% 
+  mutate(photo = str_sub(photo, end = 16)) %>% 
+  left_join(photo_map)
+
+
+write_csv(ndvi_meta, here("data", "ghecto_fullndvi.csv"))
+```
+
+## Below are incomplete attempts at parallelization
+
+```{r}
+photo_path = here("ndvi_photos/calibrated_clipped")
+clipped_photos = list.files(photo_path)
+
+ndvi_df = tibble(photo = clipped_photos) %>% 
+  mutate(mean_ndvi = NaN, median_ndvi = NaN, sd_ndvi = NaN)
+
+# Create a tibble to store results
+ndvi_df <- foreach(i = 1:10, .combine = rbind) %dopar% {
+  loop_stack = stack(paste(photo_path, files[i], sep = "/"))
+  loop_brick = brick(loop_stack)
+  loop_ndvi <- (loop_brick[[3]] - loop_brick[[1]]) / (loop_brick[[3]] + loop_brick[[1]])
+  
+  # Calculate statistics for each iteration
+  stats <- c(
+    mean_ndvi = mean(loop_ndvi@data@values, na.rm = TRUE),
+    median_ndvi = median(loop_ndvi@data@values, na.rm = TRUE),
+    sd_ndvi = sd(loop_ndvi@data@values, na.rm = TRUE)
+  )
+  
+  as_tibble(stats)
+}
+
+
+# Stop parallel processing
+stopCluster()
+
+
+
+
+
+
+```
+
+```{r}
+photo_path = here("ndvi_photos/calibrated_clipped")
+clipped_photos = list.files(photo_path)
+
+ndvi_df = tibble(photo = clipped_photos) %>% 
+  mutate(mean_ndvi = NaN, median_ndvi = NaN, sd_ndvi = NaN)
+
+parallel::detectCores()
+n.cores <- parallel::detectCores() - 1
+my.cluster <- parallel::makeCluster(
+  n.cores, 
+  type = "FORK" #if running on a cluster or windows machine, use "PSOCK"
+  )
+print(my.cluster)
+#register it to be used by %dopar%
+doParallel::registerDoParallel(cl = my.cluster)
+foreach::getDoParRegistered()
+
+# Initialize an empty list to store results
+results_list <- foreach(i = 1:9, .combine = 'c') %dopar% {
+  loop_stack = stack(paste(photo_path, clipped_photos[i], sep = "/"))
+  loop_brick = brick(loop_stack)
+  loop_ndvi <- (loop_brick[[3]] - loop_brick[[1]]) / (loop_brick[[3]] + loop_brick[[1]])
+  
+  # Calculate statistics for each iteration
+  mean_ndvi <- mean(loop_ndvi@data@values, na.rm = TRUE)
+  median_ndvi <- median(loop_ndvi@data@values, na.rm = TRUE)
+  sd_ndvi <- sd(loop_ndvi@data@values, na.rm = TRUE)
+  
+  # Return the results as a list
+  list(mean_ndvi = mean_ndvi, median_ndvi = median_ndvi, sd_ndvi = sd_ndvi)
+}
+
+# Combine the results into a data frame
+ndvi_df <- data.frame(do.call(rbind, results_list))
+
+ndvi_mean_df <- ndvi_df %>%
+  slice(seq(1, n(), by = 3)) %>% 
+  rename(mean_ndvi = 1)
+  
+ndvi_median_df <- ndvi_df %>%
+  slice(seq(2, n(), by = 3))%>% 
+  rename(median_ndvi = 1)
+
+ndvi_sd_df <- ndvi_df %>%
+  slice(seq(3, n(), by = 3))%>% 
+  rename(sd_ndvi = 1)
+
+ndvi_full = tibble(photos = clipped_photos[1:100]) %>% 
+  bind_cols(ndvi_mean_df, ndvi_median_df, ndvi_sd_df)%>% 
+  mutate(photos = str_sub(photos, end = 16))
+
+rownames(ndvi_full) <- NULL
+
+photo_map = read_csv(here("data/MAPIR Photos to ID - total.csv")) %>% 
+  rename(photo = photo_ID)%>% 
+  mutate(photo = str_sub(photo, end = 16))
+
+ndvi_meta_parallel = ndvi_full %>% 
+  left_join(photo_map)
+
+
+#write_csv(ndvi_meta, here("data", "ghecto_fullndvi.csv"))
+
+```

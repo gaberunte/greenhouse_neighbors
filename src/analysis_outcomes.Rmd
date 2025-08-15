@@ -1,0 +1,637 @@
+---
+title: "Effects of co-planting"
+author: "Gabe Runte"
+date: "2024-02-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(here)
+library(janitor)
+library(RColorBrewer)
+library(tidyverse)
+
+source(here("src", "colors.R"))
+```
+
+## Read in files
+```{r, message = F}
+measure = read_csv(here("data", "analysis/size_master.csv"))
+harvest = read_csv(here("data", "analysis/harvest_metrics.csv")) 
+health = read_csv(here("data", "analysis/ndvi_data.csv"))
+harvest_tips = read_csv(here("data", "analysis/harvest_roottips - all.csv"))
+harvest_mass = read_csv(here("data", "harvest", "harvest_biomass_wideclean.csv"))
+image_data = read_csv(here("data", "wide_final_seedling_area.csv"))
+repot_scan = read_csv(here("data/repotting", "seedling_scan_data.csv")) %>% 
+  select(-seedling_sp, -notes, -height_cm)
+neighb_pairs = read_csv(here("data", "design", "ghecto_neighbor_pairs.csv"))
+trt = read_csv(here("data", "design", "seedling_treatments.csv"))
+drought = read_csv(here("data", "design", "drought_assignments_bypot.csv")) %>% 
+  select(1,3)
+harvest_comm = read_csv( here("data", "harvest", "harvest_community_matrix_scaled.csv"))
+
+pressure = read_csv(here("data/harvest", "pressure_bomb - Sheet1.csv")) %>% 
+  select(1:4) %>%  mutate(time = tolower(time))
+sapwood = read_csv(here("data/harvest", "harvest_sapwood.csv"))
+```
+
+### Edit/compile some files
+```{r, warning = F, message=F}
+colonization = harvest_tips %>% mutate(harvest_col = colonized/(colonized+uncolonized)) %>% 
+              select(seedling_id, harvest_col) %>% 
+              mutate(seedling_id = as.numeric(seedling_id))
+
+drought_treat = health %>% 
+  select(seedling_id, treatment) %>% distinct()
+
+total_treat = measure %>% 
+  select(seedling_id, seedling_sp, soil_type, neighbor, neighb_sp, neighb_st, pot) %>% distinct() %>% drop_na()
+
+image_df = image_data %>% left_join(total_treat) %>% 
+  mutate(total_foliar = foliar+predawn_foliar+midday_foliar) %>% 
+  left_join(drought_treat)
+
+sort_string_chars <- function(s) {
+  paste(sort(unlist(strsplit(s, ""))), collapse = "")
+}
+
+pot_df = neighb_pairs %>% 
+  rename(seedling_id = seedling_1) %>% 
+  left_join(trt) %>% 
+  rename(sp1 = seedling_sp, st1 = soil_type) %>% 
+  select(!seedling_id) %>% 
+  rename(seedling_id = seedling_2) %>% 
+  left_join(trt)%>% 
+  rename(sp2 = seedling_sp, st2 = soil_type) %>% 
+  mutate(spp = paste0(sp1, sp2))%>% 
+  mutate(stt = paste0(st1, st2)) %>% 
+  select(pot, spp, stt) %>% 
+  mutate(spp = map_chr(spp, sort_string_chars)) %>% #alphabetize the combo to minimize different uniques
+  mutate(stt = map_chr(stt, sort_string_chars)) %>% 
+  left_join(drought)
+```
+
+Let's look first at outcomes of mass, relative to area at repotting
+Here, I will standardize both measures in order to make them as comparable as possible. 
+
+```{r, message}
+repot_std = repot_scan %>% 
+  rename(shoot = above_area_cm2, root = underground_area_cm2) %>% 
+  left_join(trt) %>% 
+  group_by(seedling_sp) %>%
+  mutate(total = root+shoot) %>% 
+  mutate(rs = root/shoot) %>% 
+  mutate(shoot = (shoot-mean(shoot))/sd(shoot))%>% 
+  mutate(root = (root-mean(root))/sd(root)) %>% 
+  mutate(total = (total-mean(total))/sd(total))%>% 
+  mutate(rs = (rs-mean(rs))/sd(rs)) %>% 
+  rename(r_shoot = shoot, r_root = root, r_total = total, r_rs = rs)
+
+harvest_std = harvest_mass %>% 
+  left_join(trt) %>% 
+  mutate(shoot = shoot+foliar) %>% select(-foliar)%>% 
+  filter(!is.na(root)) %>% 
+  group_by(seedling_sp)%>%
+  mutate(total = root+shoot) %>% 
+  mutate(rs = root/shoot)%>% 
+  filter(is.finite(rs)) %>% 
+  mutate(shoot = (shoot-mean(shoot))/sd(shoot))%>% 
+  mutate(root = (root-mean(root, na.rm = T))/sd(root, na.rm = T))%>% 
+  mutate(total = (total-mean(total, na.rm = T))/sd(total, na.rm = T))%>% 
+  mutate(rs = (rs-mean(rs, na.rm=T))/sd(rs, na.rm=T))%>% 
+  rename(h_shoot = shoot, h_root = root, h_total = total, h_rs = rs)
+
+size_std = harvest_std %>% #start with harvest to drop all seedlings not in both datasets (not repotted or dead)
+  left_join(repot_std) %>% 
+  mutate(shoot_rel = h_shoot-r_shoot)%>% 
+  mutate(root_rel = h_root-r_root)%>% 
+  mutate(total_rel = h_total-r_total) %>% 
+  mutate(rs_rel = h_rs-r_rs) %>% 
+  left_join(total_treat) %>% 
+  left_join(drought_treat) %>% 
+  filter(!is.na(neighb_sp)) %>% 
+  left_join(harvest_mass) %>% 
+  mutate(mass = shoot+root+foliar) 
+```
+
+
+Does neighbor species effect outcomes by itself? 
+  Yes! Oaks grow more when planted next to a bigcone. Oaks next to bigcones do better than bigcones next to bigcones. True for total size and root size. For bigcones, more root production next to an oak neighbor (p= 0.057).
+```{r}
+ggplot(size_std, aes(x = neighb_sp, y = total_rel, fill = neighb_sp))+
+  gg_nspfill+geom_boxplot()+facet_grid(rows = vars(seedling_sp))
+
+TukeyHSD(aov(total ~ seedling_sp*neighb_sp, data = size_std))
+```
+
+
+
+How about neighbor soil type? 
+  Yes. Control neighbor soil led to less growth in both species. Effects were significantly stronger for bigcones. This is persistent across total, root, and shoot. For RS, P<C and Q<C but p=0.059 for the latter. Remember here RS down is good. The only significant interaction was P:P-P:C.
+```{r}
+ggplot(size_std, aes(x = neighb_sp, y = total_rel, fill = neighb_sp))+
+  gg_nspfill+geom_boxplot()+facet_grid(rows = vars(seedling_sp))
+
+TukeyHSD(aov(rs_rel ~ seedling_sp*neighb_st, data = size_std))
+```
+
+
+
+
+Now, for the interaction between the two
+Total: An oak neighbor from bigcone soil was better than an oak neighbor from control soil. A bigcone neighbor from control soil was worse than either live soil type. 
+Root: Q:P > Q:C p = 0.058
+Shoot: Q:P>Q:C
+RS: Q:P<Q:C p = 0.062
+```{r}
+TukeyHSD(aov(rs_rel ~ seedling_sp*neighb_sp*neighb_st, data = size_std))
+```
+
+
+Can I be so bold as to cross these interactions with drought? Let's try. 
+
+N_st:Treatment 
+Total: P:D/Q:D>C:D, P:C>C:C
+Shoot:  P:D>C:D - If you're droughted, better for the neighbor to be from bigcone soil?? WHY
+Root: Q:D>C:D p = 0.052
+RS: P:D<C:D
+```{r}
+TukeyHSD(aov(rs_rel ~ seedling_sp*neighb_sp*neighb_st*treatment, data = size_std))
+```
+
+
+
+
+## Stress outcomes (going to look at end of drought outcomes)
+
+```{r}
+ndvi_std = health %>% 
+  filter(sample ==4) %>% 
+  select(seedling_id, mean_ndvi, treatment) %>% ##Standardizing to spxsoil because I have no initial time point to reference
+  left_join(total_treat) %>% 
+  group_by(seedling_sp, soil_type) %>% 
+  filter(!is.na(mean_ndvi)) %>% 
+  mutate(ndvi = (mean_ndvi-mean(mean_ndvi))/sd(mean_ndvi))
+```
+
+All soil types did worse in drought but not worse than one another's drought effects.
+```{r}
+TukeyHSD(aov(ndvi ~ treatment*seedling_sp*soil_type, data = ndvi_std))
+```
+
+
+
+
+How does neighbor species effect NDVI? 
+  Both species experience strong effects of drought on NDVI. The drop in OAK ndvi is a bit stronger
+  Neither species was worse to be next to during a drought overall. 
+  QxQ and QxP (meaning focal plant was a oak) did worse in drought.I think this simply means that oaks were more strongly effected by drought with either neighbor than bigcones were with those neighbors. Which we sort of knew. 
+  
+```{r}
+TukeyHSD(aov(ndvi ~ treatment*seedling_sp*neighb_sp, data = ndvi_std))
+```
+
+
+Neighbor soil type?
+Nothing.
+```{r}
+TukeyHSD(aov(ndvi ~ treatment*seedling_sp*neighb_st, data = ndvi_std))
+```
+
+
+
+
+Is your decline through drought driven by the size of your neighbor? 
+```{r}
+nsize = ndvi_std %>% 
+  left_join(harvest_std %>%
+              ungroup() %>% 
+              select(seedling_id, h_total) %>%  rename(size = h_total)) %>%  
+  left_join(harvest_std %>%
+              ungroup() %>% 
+              select(seedling_id, h_total) %>%  rename(neighbor = seedling_id)) %>% 
+  filter(!is.na(seedling_sp))%>% 
+  filter(!is.na(neighb_sp)) %>% 
+  mutate(relsize = (size-h_total))%>% 
+  mutate(totsize = (size+h_total))
+
+
+
+ggplot(nsize, aes(x = totsize, y = ndvi, color = treatment))+
+  gg_droughtcolor+geom_point()+geom_smooth(method = "lm")+
+  facet_grid(rows = vars(seedling_sp), cols = vars(neighb_sp))
+
+summary(lm(ndvi~totsize*seedling_sp*neighb_sp*treatment*soil_type, data = nsize))
+```
+
+
+## Stress outcomes (going to look at end of drought outcomes) ((((Taking average NDVI for each individual))))
+
+```{r}
+ndvi_std = health %>% 
+  filter(sample == 4) %>% 
+  select(seedling_id, mean_ndvi, treatment) %>% 
+  group_by(seedling_id, treatment)%>% 
+  summarize(mean_ndvi = mean(mean_ndvi)) %>% 
+  left_join(total_treat) %>% 
+  group_by(seedling_sp, soil_type) %>% 
+  filter(!is.na(mean_ndvi)) %>% 
+  mutate(ndvi = (mean_ndvi-mean(mean_ndvi))/sd(mean_ndvi))
+```
+
+All soil types did worse in drought but not worse than one another's drought effects.
+```{r}
+TukeyHSD(aov(ndvi ~ treatment*seedling_sp*soil_type, data = ndvi_std))
+```
+
+How does neighbor species effect NDVI? 
+  Seedlings do worse with OAK neighbors
+```{r}
+TukeyHSD(aov(ndvi ~ treatment*seedling_sp*neighb_sp, data = ndvi_std))
+```
+
+Neighbor soil type?
+Nothing.
+```{r}
+TukeyHSD(aov(ndvi ~ treatment*seedling_sp*neighb_st, data = ndvi_std))
+```
+
+
+
+## Timeseries? 
+
+```{r}
+
+series = harvest_std %>% 
+  rename(root = h_root, shoot = h_shoot, total = h_total, rs = h_rs) %>% 
+  select(seedling_id, root, shoot, total, rs) %>% 
+  mutate(time = "b_harvest") %>% 
+  bind_rows(repot_std %>% 
+  rename(root = r_root, shoot = r_shoot, total = r_total, rs = r_rs) %>% 
+  select(seedling_id, root, shoot, total, rs) %>% 
+  mutate(time = "a_repot")) %>% 
+  left_join(total_treat) %>% 
+  left_join(drought_treat) %>% 
+  filter(!is.na(soil_type)) %>% 
+  mutate(nsp = case_when(
+    time == "a_repot" ~ "None",
+    .default = neighb_sp
+  ))%>% 
+  mutate(nst = case_when(
+    time == "a_repot" ~ "None",
+    .default = neighb_st
+  ))
+
+ggplot(series, aes(x = time, y = total, fill = nsp, group = nsp))+
+  geom_boxplot(alpha = 0.75)+facet_grid(rows = vars(seedling_sp), cols = vars(soil_type))+
+  geom_point(aes(color = nst),alpha = 0.5 , position = position_jitterdodge(jitter.width = 0.15))
+
+ggplot(size_std, aes(x = treatment, y = total_rel, fill = soil_type, fill = soil_type))+
+  geom_boxplot(alpha = 0.7)+facet_wrap(~seedling_sp)
+ggplot(size_std, aes(x = treatment, y = h_total, fill = soil_type, fill = soil_type))+
+  geom_boxplot(alpha = 0.7)+facet_wrap(~seedling_sp)
+ggplot(size_std, aes(x = treatment, y = r_total, fill = soil_type, fill = soil_type))+
+  geom_boxplot(alpha = 0.7)+facet_wrap(~seedling_sp)
+
+ggplot(size_std, aes(x = treatment, y = sqrt(rs_rel), fill = soil_type, fill = soil_type))+
+  geom_boxplot(alpha = 0.7)+facet_wrap(~seedling_sp)
+ggplot(size_std, aes(x = treatment, y = sqrt(h_rs), fill = soil_type, fill = soil_type))+
+  geom_boxplot(alpha = 0.7)+facet_wrap(~seedling_sp)
+```
+
+```{r}
+TukeyHSD(aov(lm(total_rel~soil_type*neighb_sp*neighb_st*treatment, data = size_std %>% 
+             filter(seedling_sp == "P"))))
+TukeyHSD(aov(lm(total_rel~soil_type*neighb_sp*neighb_st*treatment, data = size_std %>% 
+             filter(seedling_sp == "Q"))))
+
+TukeyHSD(aov(lm(rs_rel~soil_type*neighb_sp*neighb_st*treatment, data = size_std %>% 
+             filter(seedling_sp == "P"))))
+TukeyHSD(aov(lm(rs_rel~soil_type*neighb_sp*neighb_st*treatment, data = size_std %>% 
+             filter(seedling_sp == "Q"))))
+```
+
+
+
+
+
+```{r}
+TukeyHSD(aov(mean_ndvi~soil_type*neighb_sp*neighb_st*treatment, data = ndvi_std %>% 
+             filter(seedling_sp == "P")))
+TukeyHSD(aov(mean_ndvi~soil_type*neighb_sp*neighb_st*treatment, data = ndvi_std %>% 
+             filter(seedling_sp == "Q")))
+
+```
+
+
+
+```{r}
+library(randomForest)
+
+rf_df = harvest_mass %>% 
+  mutate(total = root+shoot+foliar)  %>% 
+  mutate(total = root/(shoot+foliar)) %>%
+  select(seedling_id, total) %>% 
+  left_join(total_treat) %>% 
+  left_join(drought_treat) %>% 
+  drop_na() %>% 
+  filter(seedling_sp == "P") %>% 
+  select(-seedling_sp) %>% 
+  select(-seedling_id, -pot, -neighbor)
+
+trainIndex <- sample(1:nrow(rf_df), 0.8 * nrow(rf_df))  # For an 80-20 split
+
+rf_train = rf_df[trainIndex,]
+rf_predict = rf_df[-trainIndex,]
+
+
+rfModel <- randomForest(total ~ ., data = rf_train, ntree = 5000, mtry = 3, type = "regression")
+predictions <- predict(rfModel, rf_predict)
+mse <- mean((predictions - rf_predict$total)^2)
+#print(mse)
+varImpPlot(rfModel)
+
+rf_df = harvest_mass %>% 
+  mutate(total = root+shoot+foliar)  %>% 
+  mutate(total = root/(shoot+foliar))  %>%
+  select(seedling_id, total) %>% 
+  left_join(total_treat) %>% 
+  left_join(drought_treat) %>% 
+  drop_na() %>% 
+  filter(is.finite(total)) %>% 
+  filter(seedling_sp == "Q") %>% 
+  select(-seedling_sp) %>% 
+  select(-seedling_id, -pot, -neighbor)
+
+trainIndex <- sample(1:nrow(rf_df), 0.8 * nrow(rf_df))  # For an 80-20 split
+
+rf_train = rf_df[trainIndex,]
+rf_predict = rf_df[-trainIndex,]
+
+
+rfModel <- randomForest(total ~ ., data = rf_train, ntree = 5000, mtry = 3, type = "regression")
+predictions <- predict(rfModel, rf_predict)
+mse <- mean((predictions - rf_predict$total)^2)
+#print(mse)
+varImpPlot(rfModel)
+
+```
+
+
+```{r}
+rf_df = size_std %>% 
+  ungroup() %>% 
+  mutate(total = rs_rel)  %>% 
+  select(seedling_id, total) %>% 
+  left_join(total_treat) %>% 
+  left_join(drought_treat) %>% 
+  drop_na() %>% 
+  filter(is.finite(total)) %>% 
+  filter(seedling_sp == "P") %>% 
+  select(-seedling_sp) %>% 
+  select(-seedling_id, -pot, -neighbor)
+
+trainIndex <- sample(1:nrow(rf_df), 0.8 * nrow(rf_df))  # For an 80-20 split
+
+rf_train = rf_df[trainIndex,]
+rf_predict = rf_df[-trainIndex,]
+
+
+rfModel <- randomForest(total ~ ., data = rf_train, ntree = 5000, type = "regression")
+predictions <- predict(rfModel, rf_predict)
+varImpPlot(rfModel)
+
+rf_df = size_std %>% 
+  ungroup() %>% 
+  mutate(total = rs_rel)  %>% 
+  select(seedling_id, total) %>% 
+  left_join(total_treat) %>% 
+  left_join(drought_treat) %>% 
+  drop_na() %>% 
+  filter(is.finite(total)) %>% 
+  filter(seedling_sp == "Q") %>% 
+  select(-seedling_sp) %>% 
+  select(-seedling_id, -pot, -neighbor)
+
+trainIndex <- sample(1:nrow(rf_df), 0.8 * nrow(rf_df))  # For an 80-20 split
+
+rf_train = rf_df[trainIndex,]
+rf_predict = rf_df[-trainIndex,]
+
+
+rfModel <- randomForest(total ~ ., data = rf_train, ntree = 5000, type = "regression")
+predictions <- predict(rfModel, rf_predict)
+varImpPlot(rfModel)
+```
+
+
+
+
+Total change in size is driven mostly by soil type but changes in RS are more strongly driven by neighbor soil type! Cool. 
+
+
+
+
+
+
+
+
+## Like vs unlike
+```{r}
+likeness = size_std %>% 
+  mutate(n_type = case_when(
+    seedling_sp == neighb_sp ~ "Mono",
+    seedling_sp != neighb_sp ~ "Duo"
+  ))%>% 
+  mutate(n_stype = case_when(
+    soil_type == neighb_st ~ "Mono",
+    soil_type == "Q" & neighb_st == "P" ~ "Comp",
+    soil_type == "P" & neighb_st == "Q" ~ "Comp",
+    .default = "Naive"
+  )) %>% 
+  mutate(stdiv = case_when(
+    soil_type == "C" & neighb_sp == "C" ~ 0,
+    soil_type == neighb_st ~ 1,
+    soil_type == "C" ~ 1,
+    neighb_st == "C" ~ 1,
+    .default = 2))%>% 
+  mutate(spdiv = case_when(
+    seedling_sp == neighb_sp ~ 1,
+    .default = 2)) %>% 
+  mutate(all_div = stdiv+spdiv)
+
+
+#summary(lm(total_rel~seedling_sp*n_type*n_stype, data = likeness))
+
+summary(lm(total_rel~stdiv*spdiv, data = likeness %>% 
+             filter(seedling_sp == "P")))
+summary(lm(total_rel~stdiv*spdiv, data = likeness %>% 
+             filter(seedling_sp == "Q")))
+
+summary(lm(rs_rel~stdiv*spdiv, data = likeness %>% 
+             filter(seedling_sp == "P")))
+summary(lm(rs_rel~stdiv*spdiv, data = likeness %>% 
+             filter(seedling_sp == "Q")))
+```
+## Does neighbor size relative to you at repotting influence your eventual growth
+```{r}
+repot_size= repot_scan %>% 
+  rename(shoot = above_area_cm2, root = underground_area_cm2) %>% 
+  left_join(trt) %>% 
+  mutate(total = root+shoot) %>% 
+  left_join(total_treat %>% select(seedling_id, neighbor))
+rel_neighb_size = repot_size %>% 
+  select(seedling_id, total, neighbor) %>% 
+  left_join(repot_size %>% select(seedling_id, total) %>% rename(neighbor = seedling_id, n_size = total)) %>% 
+  drop_na()
+
+dwarfed = size_std %>%
+  select(1,4,5:6,10,12:20) %>% 
+  left_join(rel_neighb_size) %>% 
+  mutate(rel = (total/n_size)) %>% 
+  mutate(samesoil = soil_type == neighb_st) %>% 
+  rename(relsize = rel)
+
+nocontrol = dwarfed %>% 
+  filter(seedling_sp == "P") %>% 
+  mutate(soilsoil = paste0(soil_type, neighb_st)) %>% 
+  filter(! soilsoil == "CC") 
+  
+total_model = (lm(total_rel~soil_type*neighb_sp*neighb_st*treatment*samesoil*r_total, data = nocontrol))
+summary(total_model)
+model_choice = MASS::stepAIC(total_model)
+
+model_choice$call
+
+summary(lm(formula = total_rel ~ soil_type + neighb_sp + neighb_st + 
+    treatment + samesoil + r_total + neighb_sp:neighb_st + soil_type:treatment + 
+    neighb_sp:treatment + neighb_st:treatment + soil_type:r_total + 
+    neighb_sp:r_total + neighb_st:r_total + treatment:r_total + 
+    samesoil:r_total + neighb_sp:neighb_st:r_total + soil_type:treatment:r_total + 
+    neighb_sp:treatment:r_total + neighb_st:treatment:r_total, 
+    data = nocontrol))
+
+summary(lm(formula = total_rel ~ soil_type + neighb_sp + neighb_st + 
+    treatment  + samesoil  + treatment:samesoil, 
+    data = dwarfed %>% filter(seedling_sp == "P")))
+ggplot(nocontrol, aes(x = relsize, y = total_rel, col = soil_type))+
+  geom_point()+geom_smooth(method= "lm", se = F)+lims(y = c(0,2.5))
+ggplot(nocontrol %>% filter(neighb_sp == "P"), aes(x = relsize, y = total_rel, col = soil_type))+
+  geom_point()+geom_smooth(method= "lm", se = F)+lims(y = c(0,2.5))
+ggplot(nocontrol %>% filter(neighb_sp == "Q"), aes(x = relsize, y = total_rel, col = soil_type))+
+  geom_point()+geom_smooth(method= "lm", se = F)+lims(y = c(0,2.5))
+```
+
+
+```{r}
+total_model = (lm(rs_rel~soil_type*neighb_sp*neighb_st*treatment*rel*samesoil, data = dwarfed %>% 
+             filter(seedling_sp == "Q")))
+summary(total_model)
+model_choice = MASS::stepAIC(total_model)
+
+model_choice$call
+
+summary(lm(formula = rs_rel ~ soil_type + neighb_sp + neighb_st + treatment + 
+    rel + soil_type:neighb_sp + soil_type:neighb_st + neighb_sp:neighb_st + 
+    soil_type:treatment + neighb_sp:treatment + neighb_st:treatment + 
+    soil_type:rel + neighb_sp:rel + neighb_st:rel + treatment:rel + 
+    soil_type:neighb_sp:neighb_st + soil_type:neighb_st:treatment + 
+    neighb_sp:neighb_st:treatment + soil_type:neighb_st:rel + 
+    neighb_sp:neighb_st:rel + neighb_sp:treatment:rel, data = dwarfed %>% 
+    filter(seedling_sp == "Q")))
+
+
+# ggplot(dwarfed %>% filter(seedling_sp == "Q"), aes(x = treatment, y = total_rel))+
+#   geom_boxplot()
+```
+
+```{r}
+likesize = likeness %>% 
+  left_join(dwarfed)
+
+total_model = (lm(total_rel~soil_type*neighb_sp*neighb_st*treatment*rel*spdiv*stdiv, data = likesize %>% 
+             filter(seedling_sp == "P")))
+
+model_choice = MASS::stepAIC(total_model)
+
+allcall =  model_choice$call
+
+
+
+total_model = (lm(total_rel~soil_type*treatment*rel*spdiv*stdiv, data = likesize %>% 
+             filter(seedling_sp == "P")))
+
+model_choice = MASS::stepAIC(total_model)
+
+blindcall =  model_choice$call
+
+#all
+summary(lm(formula = total_rel ~ soil_type + neighb_sp + neighb_st + 
+    treatment + rel + neighb_sp:treatment + neighb_st:treatment + 
+    neighb_sp:rel + neighb_st:rel + treatment:rel, data = likesize %>% 
+    filter(seedling_sp == "P")))
+#blind
+AIC(lm(formula = total_rel ~ soil_type + rel + spdiv + stdiv, data = likesize %>% 
+    filter(seedling_sp == "P")))
+```
+## Doing the above with numerical treatments
+```{r}
+likesize = likeness %>% 
+  left_join(dwarfed)
+
+total_model = (lm(total_rel~soil_type*neighb_sp*neighb_st*treatment*rel*spdiv*stdiv, data = likesize %>% 
+             filter(seedling_sp == "Q")))
+
+model_choice = MASS::stepAIC(total_model)
+
+allcall =  model_choice$call
+
+
+
+total_model = (lm(total_rel~soil_type*treatment*rel*spdiv*stdiv, data = likesize %>% 
+             filter(seedling_sp == "Q")))
+
+model_choice = MASS::stepAIC(total_model)
+
+blindcall =  model_choice$call
+
+#all
+AIC(lm(formula = total_rel ~ soil_type + neighb_sp + neighb_st + 
+    treatment + rel + soil_type:neighb_sp + soil_type:neighb_st + 
+    soil_type:treatment + neighb_sp:treatment + neighb_st:treatment + 
+    soil_type:neighb_sp:treatment + soil_type:neighb_st:treatment, 
+    data = likesize %>% filter(seedling_sp == "Q")))
+#blind
+AIC(lm(formula = total_rel ~ soil_type + treatment + rel + spdiv + 
+    stdiv + soil_type:treatment + soil_type:rel + treatment:rel + 
+    soil_type:spdiv + treatment:spdiv + soil_type:stdiv + treatment:stdiv + 
+    rel:stdiv + soil_type:treatment:rel + soil_type:treatment:spdiv + 
+    soil_type:treatment:stdiv + soil_type:rel:stdiv + treatment:rel:stdiv + 
+    soil_type:treatment:rel:stdiv, data = likesize %>% filter(seedling_sp == 
+    "Q")))
+```
+
+```{r}
+dwarf_health = dwarfed %>% left_join(ndvi_std %>% select(seedling_id, ndvi))
+
+total_model = (lm(ndvi~soil_type*neighb_sp*neighb_st*treatment*rel*samesoil, data = dwarf_health %>% 
+             filter(seedling_sp == "P")))
+
+model_choice = MASS::stepAIC(total_model)
+
+model_choice$call
+
+summary(lm(formula = ndvi ~ soil_type + neighb_sp + neighb_st + treatment + 
+    rel + samesoil + soil_type:neighb_sp + soil_type:neighb_st + 
+    neighb_sp:neighb_st + soil_type:treatment + neighb_sp:treatment + 
+    neighb_st:treatment + soil_type:rel + neighb_sp:rel + neighb_st:rel + 
+    treatment:rel + neighb_sp:samesoil + treatment:samesoil + 
+    rel:samesoil + soil_type:neighb_sp:treatment + soil_type:neighb_st:treatment + 
+    neighb_sp:neighb_st:treatment + neighb_sp:treatment:rel + 
+    neighb_sp:treatment:samesoil + neighb_sp:rel:samesoil + treatment:rel:samesoil + 
+    neighb_sp:treatment:rel:samesoil, data = dwarf_health %>% 
+    filter(seedling_sp == "P")))
+```
+ 
+

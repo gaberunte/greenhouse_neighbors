@@ -1,0 +1,257 @@
+---
+title: "Untitled"
+author: "Gabe Runte"
+date: "2024-10-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(here)
+library(janitor)
+library(RColorBrewer)
+library(multcompView)
+library(patchwork)
+library(tidyverse)
+
+source(here("src", "colors.R"))
+```
+
+## Read in files
+```{r, message = F}
+measure = read_csv(here("data", "analysis/size_master.csv"))
+harvest = read_csv(here("data", "analysis/harvest_metrics.csv")) 
+health = read_csv(here("data", "analysis/ndvi_data.csv"))
+harvest_tips = read_csv(here("data", "analysis/harvest_roottips - all.csv")) %>% 
+  filter(!is.na(seedling_id))
+repot_tips = read_csv(here("data", "repotting/ghecto_repotting_root_pulling_data.csv"))
+harvest_mass = read_csv(here("data", "harvest", "harvest_biomass_wideclean.csv"))
+image_data = read_csv(here("data", "wide_final_seedling_area.csv"))
+repot_mass = read_csv(here("data", "repotting", "repotting_drymass_fitted.csv"))
+neighb_pairs = read_csv(here("data", "design", "ghecto_neighbor_pairs.csv"))
+trt = read_csv(here("data", "design", "seedling_treatments.csv"))
+drought = read_csv(here("data", "design", "drought_assignments_bypot.csv")) %>% select(1,3)
+harvest_comm = read_csv( here("data", "harvest", "harvest_community_matrix_scaled.csv"))
+
+pressure = read_csv(here("data/harvest", "pressure_bomb - Sheet1.csv")) %>% select(1:4) %>%  mutate(time = tolower(time))
+sapwood = read_csv(here("data/harvest", "harvest_sapwood.csv"))
+
+repot_fungi = read_csv(here("data/repotting", "repot_community_matrix_scaled.csv"))
+```
+
+### Edit/compile some files
+```{r, warning = F, message=F}
+colonization = repot_tips %>% 
+  mutate(repot_col = case_when(
+    colonization_numerator == 0 ~ 0,
+    .default = colonization_numerator/colonization_denominator)) %>% 
+  select(seedling_id, repot_col) %>% 
+  left_join(harvest_tips %>% 
+              mutate(harvest_col = case_when(
+                    colonized == 0 ~ 0,
+                    .default =colonized/(colonized+uncolonized))) %>% 
+              select(seedling_id, harvest_col) %>% 
+              mutate(seedling_id = as.numeric(seedling_id)))
+
+n_col = colonization %>% 
+  rename(neighbor = seedling_id, nr_col = repot_col, nh_col = harvest_col) 
+
+drought_treat = health %>% 
+  select(seedling_id, treatment) %>% distinct()
+
+total_treat = measure %>% 
+  select(seedling_id, seedling_sp, soil_type, neighbor, neighb_sp, neighb_st, pot) %>% distinct() %>% drop_na() %>% 
+  left_join(drought_treat)
+
+sort_string_chars <- function(s) {
+  paste(sort(unlist(strsplit(s, ""))), collapse = "")}
+
+pot_df = neighb_pairs %>% 
+  rename(seedling_id = seedling_1) %>% 
+  left_join(trt) %>% 
+  rename(sp1 = seedling_sp, st1 = soil_type) %>% 
+  select(!seedling_id) %>% 
+  rename(seedling_id = seedling_2) %>% 
+  left_join(trt)%>% 
+  rename(sp2 = seedling_sp, st2 = soil_type) %>% 
+  mutate(spp = paste0(sp1, sp2))%>% 
+  mutate(stt = paste0(st1, st2)) %>% 
+  select(pot, spp, stt) %>% 
+  mutate(spp = map_chr(spp, sort_string_chars)) %>% #alphabetize the combo to minimize different uniques
+  mutate(stt = map_chr(stt, sort_string_chars)) %>% 
+  left_join(drought)
+
+living = measure %>% 
+  filter(date == "2023-03-01") %>% 
+  filter(alive ==1)  %>% 
+  select(seedling_id)
+
+grow_mass = repot_mass %>% 
+  rename(r_shoot = above_dry, r_root = below_dry) %>% 
+  mutate(r_rs = r_root/r_shoot) %>%
+  mutate(r_total = r_root+r_shoot) %>%
+  left_join(harvest_mass %>% 
+              mutate(shoot = shoot +foliar) %>%  select(-foliar) %>% 
+              rename(h_shoot = shoot, h_root = root) %>% 
+              mutate(h_rs = h_root/h_shoot)) %>%
+              mutate(h_total = h_root+h_shoot)%>% 
+  mutate(grow_root = (h_root-r_root)/r_root)%>% 
+  mutate(grow_shoot = (h_shoot-r_shoot)/r_shoot) %>% 
+  mutate(grow_rs = log(h_rs/r_rs)) %>% 
+  mutate(grow_total = ((h_total-r_total)/r_total)) %>%
+  mutate(soil_type = fct_relevel(soil_type, c("P", "Q", "C"))) %>% 
+  left_join(drought_treat) %>% 
+  left_join(total_treat) %>% 
+  left_join(repot_mass %>% 
+              mutate(n_total = above_dry+below_dry) %>% 
+              select(seedling_id, n_total) %>%  rename(neighbor = seedling_id)) %>% 
+  mutate(n_rel = r_total/n_total) %>% 
+  filter(seedling_id %in% living$seedling_id)
+
+ndvi = health %>% 
+  group_by(seedling_id) %>% 
+  summarize(ndvi_change = max(mean_ndvi)-min(mean_ndvi),
+            ndvi = mean(mean_ndvi), 
+            min_ndvi = min(mean_ndvi)) %>% 
+  left_join(total_treat)%>% 
+  mutate(home_rank = case_when(
+    soil_type == seedling_sp & neighb_sp == soil_type & soil_type==neighb_st ~ "Both",
+    soil_type == seedling_sp ~ "Self",
+    seedling_sp == neighb_st ~ "Neighbor",
+    .default = "None"
+  )) %>% 
+  mutate(home_rank = factor(home_rank, levels = c("None", "Neighbor", "Self", "Both"))) %>% 
+  filter(!is.na(seedling_sp)) %>% 
+  filter(seedling_id %in% living$seedling_id)
+```
+
+```{r}
+col_df = colonization %>% 
+  left_join(total_treat) %>% 
+  mutate(repot_col = case_when(
+    soil_type == "C" ~ 0, #expanding colonization set here 
+    .default = repot_col)) %>% 
+  filter(repot_col <1) %>% 
+  filter(seedling_id %in% living$seedling_id)
+
+col_growth = col_df %>% 
+  drop_na() %>% 
+  left_join(grow_mass) %>% 
+  left_join(ndvi) %>% 
+  filter(treatment == "C")%>% 
+  left_join(n_col)%>% 
+  mutate(tot_rcol = repot_col+nr_col) %>% 
+  mutate(rel_col = repot_col/(nr_col+repot_col))%>% 
+  left_join(repot_fungi)
+
+col_growth_all = col_df %>% 
+  drop_na() %>% 
+  left_join(grow_mass) %>% 
+  left_join(ndvi) %>% 
+  filter(h_rs<15) %>% 
+  mutate(repot_fungi = repot_col >0)%>% 
+  left_join(n_col) %>% 
+  mutate(tot_rcol = repot_col+nr_col) %>% 
+  mutate(rel_col = repot_col/(nr_col+repot_col))%>% 
+  left_join(repot_fungi)
+```
+
+
+```{r}
+#library(nlme)
+
+ts_df = health %>% 
+  select(3:6) %>% 
+  mutate(date_time = lubridate::mdy(date_time)) %>% 
+  left_join(total_treat) %>% 
+  rename(sam_pt = sample) %>% 
+  drop_na() %>% 
+  mutate(home_rank = case_when(
+    soil_type == seedling_sp & neighb_sp == soil_type & soil_type==neighb_st ~ "Both",
+    soil_type == seedling_sp ~ "Self",
+    seedling_sp == neighb_st ~ "Neighbor",
+    .default = "None"))
+
+dupe =  ts_df %>% 
+  group_by(seedling_id, sam_pt) %>% 
+  summarise(n = n()) %>% 
+  mutate(dupe = n > 1) %>% 
+  select(seedling_id, sam_pt, dupe)
+
+ts_df_clean = ts_df %>% 
+  left_join(dupe) %>% 
+  filter(dupe == F)
+
+ar_model <- gls(mean_ndvi ~ seedling_sp * soil_type * treatment * sam_pt, 
+                correlation = corAR1(form = ~ sam_pt | seedling_id), 
+                data = ts_df_clean)
+
+# Summary of the model
+summary(ar_model)
+
+
+
+#oak model
+oak_model <- gls(mean_ndvi ~ home_rank  * treatment * sam_pt, 
+                correlation = corAR1(form = ~ sam_pt | seedling_id),method = "ML", 
+                data = ts_df_clean %>% filter(seedling_sp == "Q"))
+summary(oak_model)
+
+best_oak_model <- MASS::stepAIC(oak_model, direction = "both")
+summary(best_oak_model)
+
+oak_model_simple <- gls(mean_ndvi ~ home_rank  * treatment, 
+                correlation = corAR1(form = ~ sam_pt | seedling_id),method = "ML", 
+                data = ts_df_clean %>% filter(seedling_sp == "Q"))
+summary(oak_model_simple)
+#bigcone model
+bigcone_model <- gls(mean_ndvi ~ home_rank + treatment + date_time, 
+                correlation = corAR1(form = ~ sam_pt | seedling_id),method = "ML", 
+                data = ts_df_clean %>% filter(seedling_sp == "P"))
+summary(bigcone_model)
+
+best_bigcone_model <- MASS::stepAIC(bigcone_model, direction = "both")
+summary(best_bigcone_model)
+
+# bigcone_model_simple <- gls(mean_ndvi ~ soil_type  * treatment*neighb_st, 
+#                 correlation = corAR1(form = ~ sam_pt | seedling_id),method = "ML", 
+#                 data = ts_df_clean %>% filter(seedling_sp == "P"))
+# summary(bigcone_model_simple)
+
+bigcone_model_simple <- gls(mean_ndvi ~ home_rank + treatment + date_time + date_time:treatment, 
+                correlation = corAR1(form = ~ date_time | seedling_id),method = "ML", 
+                data = ts_df_clean %>% filter(seedling_sp == "P"))
+summary(bigcone_model_simple)
+
+ggplot(ts_df_clean%>% filter(seedling_sp == "P"), 
+       aes(x = date_time, y = mean_ndvi, col = treatment))+
+  geom_line(aes(group = seedling_id), alpha = 0.25)+
+  facet_grid(~home_rank)+geom_line(aes(y=fitted(best_bigcone_model)))
+
+
+```
+
+
+
+```{r}
+total_model <- gls(mean_ndvi ~ home_rank + treatment + date_time +neighb_sp , 
+                correlation = corAR1(form = ~ date_time | seedling_id),method = "ML", 
+                data = ts_df_clean %>% filter(seedling_sp == "P"))
+summary(total_model)
+
+best_total_model <- MASS::stepAIC(total_model, direction = "both")
+summary(best_total_model)
+
+
+total_model <- gls(mean_ndvi ~ home_rank + treatment + date_time +neighb_sp , 
+                correlation = corAR1(form = ~ date_time | seedling_id),method = "ML", 
+                data = ts_df_clean %>% filter(seedling_sp == "Q"))
+summary(total_model)
+
+best_total_model <- MASS::stepAIC(total_model, direction = "both")
+summary(best_total_model)
+```
+
+
+
+

@@ -1,0 +1,105 @@
+---
+title: "potd"
+author: "Gabe Runte"
+date: "2024-02-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(here)
+library(janitor)
+library(RColorBrewer)
+library(tidyverse)
+
+source(here("src", "colors.R"))
+```
+
+
+I begin by reading in the relevant data.
+```{r, message = F}
+measure = read_csv(here("data", "analysis/size_master.csv"))
+harvest = read_csv(here("data", "analysis/harvest_metrics.csv")) 
+health = read_csv(here("data", "analysis/ndvi_data.csv"))
+harvest_tips = read_csv(here("data", "analysis/harvest_roottips - all.csv"))
+harvest_mass = read_csv(here("data", "harvest", "harvest_biomass_wideclean.csv"))
+repot_tips = read_csv(here("data", "repotting/ghecto_repotting_root_pulling_data.csv"))
+image_data = read_csv(here("data", "wide_final_seedling_area.csv"))
+neighb_pairs = read_csv(here("data", "design", "ghecto_neighbor_pairs.csv"))
+trt = read_csv(here("data", "design", "seedling_treatments.csv"))
+drought = read_csv(here("data", "design", "drought_assignments_bypot.csv")) %>% 
+  select(1,3)
+
+repot_comm = read_csv(here("data", "repotting", "repot_community_matrix_scaled.csv")) 
+harvest_comm = read_csv( here("data", "harvest", "harvest_community_matrix_scaled.csv"))
+
+repot_scan = read_csv(here("data/repotting", "seedling_scan_data.csv")) %>% 
+  select(-seedling_sp, -notes)
+```
+
+```{r}
+
+
+drought_treat = health %>% 
+  select(seedling_id, treatment) %>% distinct()
+
+total_treat = measure %>% 
+  select(seedling_id, seedling_sp, soil_type, neighbor, neighb_sp, neighb_st, pot) %>% distinct() %>% drop_na()
+
+image_df = image_data %>% left_join(total_treat) %>% 
+  mutate(total_foliar = foliar+predawn_foliar+midday_foliar) %>% 
+  left_join(drought_treat)
+
+sort_string_chars <- function(s) {
+  paste(sort(unlist(strsplit(s, ""))), collapse = "")
+}
+
+pot_df = neighb_pairs %>% 
+  rename(seedling_id = seedling_1) %>% 
+  left_join(trt) %>% 
+  rename(sp1 = seedling_sp, st1 = soil_type) %>% 
+  select(!seedling_id) %>% 
+  rename(seedling_id = seedling_2) %>% 
+  left_join(trt)%>% 
+  rename(sp2 = seedling_sp, st2 = soil_type) %>% 
+  mutate(spp = paste0(sp1, sp2))%>% 
+  mutate(stt = paste0(st1, st2)) %>% 
+  select(pot, spp, stt) %>% 
+  mutate(spp = map_chr(spp, sort_string_chars)) %>% #alphabetize the combo to minimize different uniques
+  mutate(stt = map_chr(stt, sort_string_chars)) %>% 
+  left_join(drought)
+```
+
+```{r}
+mass = harvest_mass %>% 
+  mutate(total = root+shoot+foliar) %>% 
+  select(1,5)
+
+np = neighb_pairs %>% 
+  left_join(mass %>%  rename(seedling_1 = seedling_id, total1 = total))%>% 
+  left_join(mass %>%  rename(seedling_2 = seedling_id, total2 = total)) %>% 
+  mutate(total = total1+total2) %>% 
+  select(pot, total)
+
+potplot = pot_df %>% 
+  left_join(np) %>% 
+  filter(!stt %in% c("CC", "CP", "CQ"))
+
+ggplot(potplot, aes(x = spp, y = total, fill = stt))+
+  geom_boxplot()
+
+pplot = total_treat %>% 
+  left_join(potplot) %>% 
+  filter(!is.na(spp))%>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  ))
+
+
+
+ggplot(pplot, aes(x = stt, y = total, fill = soil_type))+
+  geom_boxplot(alpha = 0.8)+facet_grid(spp~sp_long)
+```
+

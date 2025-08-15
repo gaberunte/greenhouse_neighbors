@@ -1,0 +1,105 @@
+---
+title: "image processing"
+author: "Gabe Runte"
+date: "2023-05-16"
+output: html_document
+---
+
+```{r setup, include=FALSE, messgage = F}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(here)
+library(janitor)
+library(magick)
+library(tidyverse)
+```
+
+
+## Writing functions
+
+```{r}
+# Function to Convert Image to Black and White and Count Black Pixels
+bw_conversion_and_count <- function(image_path) {
+  # Reading the Image
+  img <- image_read(image_path)
+  # Changing the levels in the image to increase contrast
+  img_mod = img %>% image_modulate( brightness = 150, saturation = 175, hue = 150)
+  # Converting the Image to Grayscale
+  img_gray <- img_mod %>% image_convert(colorspace = "gray")
+  # Converting the Image to Black and White
+  img_bw <- img_gray %>% image_threshold("black", "50%")
+  # Extracting Image Data
+  img_data <- image_data(img_bw)
+  # Counting Black Pixels
+  black_pixels <- sum(img_data <= 1)  # You can adjust this threshold as necessary
+  return(black_pixels)
+}
+
+bw_conversion <- function(img, files, path.out) {
+  # Changing the levels in the image to increase contrast
+  img_mod = img %>% image_modulate( brightness = 175)#, saturation = 175, hue = 150)
+  # Converting the Image to Grayscale
+  img_gray <- img_mod %>% image_convert(colorspace = "gray")
+  # Converting the Image to Black and White
+  img_bw <- img_gray %>% image_threshold("black", "80%")
+  image_write(img_bw, paste(path.out, files, sep= "/"))
+  return(img_bw)
+}
+bw_pixelcount <- function(image){
+  img_data <- image_data(image)
+  # Counting Black Pixels
+  black_pixels <- sum(img_data <= 1)  # You can adjust this threshold as necessary
+  return(black_pixels)
+}
+
+```
+
+
+```{r}
+trt = read_csv(here("data", "design", "seedling_treatments.csv"))
+path.in = "/Users/Gabe/Desktop/temp" #where are the raw photos? 
+files = list.files(path.in)
+
+img_tib = tibble(files) %>% 
+  mutate(seedling_id = as.numeric(str_sub(files, 1,4))) %>% 
+  mutate(plant_compartment = str_sub(files, 6,6)) 
+```
+
+
+
+```{r, eval = F}
+path.out = "/Users/Gabe/Desktop/temp_out" # Where shall we put the edited photos? 
+
+df_img = img_tib  %>% 
+  mutate(image = map(files, ~ image_read(paste(path.in, .x, sep ="/")))) %>%
+  mutate(bw_image = map2(.x=image, .y = files, ~ bw_conversion(.x, .y, path.out))) %>%
+  mutate(blk_pixels = map_dbl(bw_image, ~bw_pixelcount(.x))) %>%
+  mutate(dpi = rep(c(206, 214, 191, 189, 206, 181, 194, 216), each = 2)) %>% 
+  mutate(area = blk_pixels/(dpi^2*2.54*2.54)) #231dpi > in^2 > cm^2
+
+df_img_save = df_img %>% 
+  select(1:3,6,8)
+
+write_csv(df_img_save, here("data", "image_processing_repotting", "test_images.csv"))
+```
+
+## NEed to figure out how to extract dpi or im screwed
+
+```{r}
+image = image_read(paste0(path.in, "/", files[4]))
+
+bw_pixelcount <- function(image){
+  img_data <- image_data(image)
+  # Counting Black Pixels
+  black_pixels <- sum(img_data <= 1)  # You can adjust this threshold as necessary
+  return(black_pixels)
+}
+
+img_in = image_info(image)
+img_in$resolution.x
+
+tf1 = tiff::readTIFF(paste0(path.in, "/", files[4]), info =T)
+info(tf1)
+tf1
+```
+

@@ -21,6 +21,45 @@ measure = read_csv(here("data", "analysis/size_master.csv"))
 harvest = read_csv(here("data", "analysis/harvest_metrics.csv")) 
 health = read_csv(here("data", "analysis/ndvi_data.csv"))
 roottips = read_csv(here("data", "analysis/harvest_roottips - all.csv"))
+roots_repotting = read_csv(here("data", "repotting/ghecto_repotting_root_pulling_data.csv"))
+image_data = read_csv(here("data", "wide_final_seedling_area.csv"))
+
+
+repot_tips = read_csv(here("data", "repotting", "repot_community_matrix_scaled.csv")) 
+harvest_tips = read_csv( here("data", "harvest", "harvest_community_matrix_scaled.csv"))
+```
+
+
+A bit of data wrangling/cleanup
+```{r}
+tips = roottips %>% 
+  filter(!is.na(colonized)) %>% 
+  mutate(pct_col = case_when(
+    colonized == 0 ~ 0,
+    colonized >0 ~ colonized/(colonized+uncolonized)
+  )) %>% 
+  mutate(seedling_id = as.numeric(seedling_id)) %>% 
+  left_join(roots_repotting %>% 
+              mutate(repot_col = colonization_numerator/colonization_denominator) %>% 
+              select(repot_col, seedling_id)) %>% 
+  left_join(measure %>% 
+              filter(date == "2021-03-01") %>% 
+              select(seedling_id, seedling_sp, soil_type)) %>% 
+  left_join(image_data)
+
+## compare to repotting colonization, compare to above-below ratios
+
+
+ggplot(tips %>% 
+         filter(!is.na(seedling_sp)), aes(x = repot_col, y = pct_col, color = seedling_sp))+
+  geom_point()+geom_smooth(method = "lm")
+
+ggplot(tips %>% 
+         filter(!is.na(seedling_sp)), aes(x = pct_col, y = ab_ratio, color = seedling_sp))+
+  geom_point()+geom_smooth(method = "lm")+lims(y = c(0,1))
+
+summary(lm(ab_ratio~seedling_sp*pct_col, data = tips %>% 
+         filter(ab_ratio<100)))
 ```
 
 
@@ -63,9 +102,61 @@ ggplot(diversity_df, aes(x = as.factor(tree_div), y = fung_div, fill = seedling_
   geom_boxplot()
 ```
 
-Next thing to do will be to do the same analysis but to do it based on the diversity of the incoming communities and the survival of the trees in the pot. `   
+Next thing to do will be to do the same analysis but to do it based on the diversity of the incoming communities and the survival of the trees in the pot. 
+
+```{r}
+div_df = tips %>% 
+  left_join(diversity_df)
+
+ggplot(div_df %>% 
+         filter(!is.na(seedling_sp)), aes(x = as.factor(tree_div), y = pct_col, color = soil_type))+
+  geom_point()+facet_wrap(~seedling_sp)
+
+summary(lm(pct_col~seedling_sp*tree_div, data = div_df ))
+
+```
+
+```{r}
+health_col = tips %>% 
+  left_join(health %>% 
+              filter(sample == 4) %>% 
+              select(seedling_id, mean_ndvi, median_ndvi, treatment)) %>% 
+  left_join(repot_tips %>%  select(seedling_id, richness) %>% rename(repot_richness = richness))%>% 
+  left_join(harvest_tips %>%  select(seedling_id, richness) %>% rename(harvest_richness = richness))
+
+ggplot(health_col %>% 
+         filter(!is.na(seedling_sp)), aes(x = repot_richness, y = mean_ndvi, color = treatment))+
+  geom_point()+facet_grid(rows = vars(seedling_sp), cols = vars(soil_type))+theme_bw()+geom_smooth(method = "lm")+
+  scale_color_manual(name = "Drought\ntreatment", values = c("#e89689", "#6fa7e3"), breaks = c("D", "C"), labels = c("Drought", "Watered"))
+
+ggplot(health_col %>% 
+         filter(!is.na(seedling_sp)), aes(x = harvest_richness, y = mean_ndvi, color = treatment))+
+  geom_point()+facet_grid(rows = vars(seedling_sp), cols = vars(soil_type))+theme_bw()+geom_smooth(method = "lm")+
+  scale_color_manual(name = "Drought\ntreatment", values = c("#e89689", "#6fa7e3"), breaks = c("D", "C"), labels = c("Drought", "Watered"))
+
+ggplot(health_col %>% 
+         filter(!is.na(seedling_sp)), aes(x = pct_col, y = mean_ndvi, color = treatment))+
+  geom_point()+facet_grid(rows = vars(seedling_sp), cols = vars(soil_type))+theme_bw()+geom_smooth(method = "lm")+
+  scale_color_manual(name = "Drought\ntreatment", values = c("#e89689", "#6fa7e3"), breaks = c("D", "C"), labels = c("Drought", "Watered"))
+
+ggplot(health_col %>% 
+         filter(!is.na(seedling_sp)), aes(x = pct_col, y = median_ndvi, color = treatment))+
+  geom_point()+facet_grid(rows = vars(seedling_sp), cols = vars(soil_type))+theme_bw()+geom_smooth(method = "lm")+
+  scale_color_manual(name = "Drought\ntreatment", values = c("#e89689", "#6fa7e3"), breaks = c("D", "C"), labels = c("Drought", "Watered"))
 
 
+ggplot(health_col %>% 
+         filter(!is.na(seedling_sp))%>% 
+         filter(!is.na(treatment)), aes(x = treatment, y = mean_ndvi, fill = treatment))+
+  geom_boxplot()+geom_jitter(width = 0.25, alpha = 0.25)+facet_grid(rows = vars(seedling_sp), cols = vars(soil_type))+theme_bw()+
+  scale_fill_manual(name = "Drought\ntreatment", values = c("#e89689", "#6fa7e3"), breaks = c("D", "C"), labels = c("Drought", "Watered"))
+
+ggplot(health_col %>% 
+         filter(!is.na(seedling_sp))%>% 
+         filter(!is.na(treatment)), aes(x = soil_type, y = mean_ndvi, fill = treatment))+
+  geom_boxplot()+geom_jitter(width = 0.25, alpha = 0.25)+facet_grid(rows = vars(seedling_sp), cols = vars(treatment))+theme_bw()+
+  scale_fill_manual(name = "Drought\ntreatment", values = c("#e89689", "#6fa7e3"), breaks = c("D", "C"), labels = c("Drought", "Watered"))
+```
 
 
 

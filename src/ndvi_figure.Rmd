@@ -1,0 +1,101 @@
+---
+title: "home match figure"
+author: "Gabe Runte"
+date: "2024-06-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(here)
+library(janitor)
+library(RColorBrewer)
+library(kableExtra)
+library(tidyverse)
+
+source(here("src", "colors.R"))
+```
+
+## Read in files
+```{r, message = F, result = F, echo = F}
+```
+
+```{r, message = F}
+measure = read_csv(here("data", "analysis/size_master.csv"), show_col_types = FALSE)
+harvest = read_csv(here("data", "analysis/harvest_metrics.csv"), show_col_types = FALSE) 
+health = read_csv(here("data", "analysis/ndvi_data.csv"), show_col_types = FALSE)
+drought = read_csv(here("data", "design", "drought_assignments_bypot.csv"), show_col_types = FALSE) %>% select(1,3) %>% 
+  mutate(treatment = case_when(
+    drought == "Yes"~"D", 
+    drought == "No"~ "C"
+  )) %>% select(-drought)
+
+total_treat = measure %>% 
+  select(seedling_id, seedling_sp, soil_type, neighbor, neighb_sp, neighb_st, pot) %>% 
+  distinct() %>% drop_na() %>% left_join(drought)
+
+living = measure %>% 
+  filter(date == "2022-04-01") %>% 
+  filter(alive ==1) %>% 
+  select(seedling_id)
+  
+```
+
+```{r}
+ndvi_sheet = health %>% 
+  group_by(seedling_id) %>% 
+  summarize(ndvi = mean(mean_ndvi)) %>% 
+  left_join(total_treat)%>% 
+  mutate(home_rank = case_when(
+    soil_type == seedling_sp & neighb_sp == soil_type & soil_type==neighb_st ~ "Both",
+    soil_type == seedling_sp ~ "Self",
+    seedling_sp == neighb_st ~ "Neighbor",
+    .default = "None"
+  )) %>% 
+  mutate(home_rank = factor(home_rank, levels = c("None", "Neighbor", "Self", "Both"))) %>% 
+  filter(!is.na(seedling_sp)) %>% 
+  filter(seedling_id %in% living$seedling_id)
+```
+
+```{r}
+ggplot(ndvi_sheet, aes(x = home_rank, y = ndvi, fill = treatment))+
+  geom_point(position = position_jitterdodge(jitter.width = 0.1), aes(col = treatment), alpha = 0.25)+
+  geom_boxplot(alpha = 0.8)+facet_wrap(~seedling_sp)+theme_minimal()+gg_droughtfill+gg_droughtcolor+
+  labs(x="Home soil match", y="Mean NDVI")
+```
+
+```{r}
+ndvi_p = multcompLetters4(aov(ndvi~treatment*home_rank, data = ndvi_sheet %>% filter(seedling_sp=="P")), 
+                         TukeyHSD(aov(ndvi~treatment*home_rank, data = ndvi_sheet%>% filter(seedling_sp=="P"))))
+
+mv_p_tib = tibble(longname = rownames(as.data.frame.list(ndvi_p$`treatment:home_rank`)),
+                   let = ndvi_p$`treatment:home_rank`$Letters) %>% 
+  separate(longname, into = c("treatment", "home_rank")) %>% 
+mutate(seedling_sp="P")
+
+ndvi_q = multcompLetters4(aov(ndvi~treatment*home_rank, data = ndvi_sheet %>% filter(seedling_sp=="Q")), 
+                         TukeyHSD(aov(ndvi~treatment*home_rank, data = ndvi_sheet%>% filter(seedling_sp=="Q"))))
+
+mv_q_tib = tibble(longname = rownames(as.data.frame.list(ndvi_q$`treatment:home_rank`)),
+                   let = ndvi_q$`treatment:home_rank`$Letters) %>% 
+  separate(longname, into = c("treatment", "home_rank")) %>% 
+mutate(seedling_sp="Q")
+
+
+letterset = bind_rows(mv_p_tib, mv_q_tib)
+ndvi_long = ndvi_sheet %>% 
+  left_join(letterset)%>% 
+  mutate(home_rank = factor(home_rank, levels = c("None", "Neighbor", "Self", "Both")))
+
+ggplot(ndvi_long, aes(x = home_rank, y = ndvi, fill = treatment))+
+  geom_point(position = position_jitterdodge(jitter.width = 0.1), aes(col = treatment), alpha = 0.25)+
+  geom_boxplot(alpha = 0.8)+facet_wrap(~seedling_sp)+theme_minimal()+gg_droughtfill+gg_droughtcolor+
+  labs(x="Home soil match", y="Mean NDVI")+
+    geom_text(aes(x = home_rank, y = .15, label = let), size = 3, position = position_dodge(width = 0.75))
+```
+
+
+```{r}
+
+```
+

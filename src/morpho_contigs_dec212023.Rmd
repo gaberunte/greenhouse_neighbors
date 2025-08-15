@@ -1,0 +1,325 @@
+---
+title: "Untitled"
+author: "Gabe Runte"
+date: "12/08/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(vegan)
+library(here)
+library(janitor)
+library(gridExtra)
+library(RColorBrewer)
+
+```
+
+First, I will pull in all of the sequences that I want to assign taxonomy to. Workflow is as follows:
+1. Pull all of the consensus sequences
+2. Combine with list of sequences not assigned to a contig
+3. Map these onto the total list of sequences, allowing one to then remove samples with short sequences or with <2% high quality bp reads
+4. Create final list of sequences to be assigned taxonomy
+```{r, message = F}
+folder = "data/sanger_data/morpho_dec212023"
+
+consensus = read_csv(here(folder, "consensus.csv")) %>% 
+  clean_names() %>% 
+  dplyr::select(name, sequence) %>% 
+  rename(sequence_list_name = name)
+
+contig_assign = read_csv(here(folder, "contigs.csv")) %>% 
+  clean_names() %>% 
+  rename(contig_sequence = sequence) %>% 
+  left_join(consensus)
+
+metadata = read_csv(here(folder, "all_seqs.csv")) %>% 
+  clean_names() %>% 
+  rename(original_seq = sequence) %>% 
+  left_join(contig_assign) %>% 
+  mutate(sequence = case_when(
+    is.na(sequence_list_name) ~ original_seq,
+    !is.na(sequence_list_name) ~ sequence
+  )) %>% 
+  select(!original_seq)%>% 
+  select(!contig_sequence) %>% 
+  filter(!is.na(sequence))
+
+morpho = read_csv(here("data/harvest", "harvest_roottips - all.csv")) %>% 
+  clean_names() %>% 
+  pivot_longer(cols = 6:13, names_to = "row", values_to = "morphotype") %>% 
+  filter(!is.na(plate)) %>% 
+  mutate(row = toupper(row)) %>% 
+  filter(!is.na(morphotype))
+
+```
+
+
+
+```{r, eval = FALSE}
+unite.ref <- "/Users/Gabe/Desktop/phd/ghecto/unite_db/sh_general_release_s_10.05.2021/sh_general_release_dynamic_s_10.05.2021.fasta"
+unique_sequences = unique(metadata$sequence)
+tiptaxa = dada2::assignTaxonomy(unique_sequences, unite.ref, multithread = TRUE, tryRC = TRUE)
+
+
+unite_taxa = tibble(as.data.frame(tiptaxa)) %>% 
+  mutate(sequence = rownames(tiptaxa))
+write_csv(unite_taxa, here(folder, "unite_output.csv"))
+```
+
+
+```{r}
+unite_taxa = read_csv(here(folder, "unite_output.csv")) 
+sample_sheet = read_csv(here("data/harvest", "harvest_tipseq_printout.csv")) %>% 
+  mutate(sampleset = "m5x") %>% 
+  bind_rows(read_csv(here("data/harvest", "harvest_tipseq_printout2.csv")) %>% 
+  mutate(sampleset = "m2x")) %>% 
+  bind_rows(read_csv(here("data/harvest", "harvest_tipseq_printout3.csv")) %>% 
+  mutate(sampleset = "m3x")) %>%  
+  bind_rows(read_csv(here("data/harvest", "harvest_tipseq_printout4.csv")) %>% 
+  mutate(sampleset = "m4x")%>% 
+    rename(comb_column = newcolumn, comb_row = newrow)) %>% 
+  select(-plate, -column, -row)
+seedlings = read_csv(here("data/analysis","size_master.csv" )) %>% 
+  select(seedling_id, seedling_sp, soil_type, neighb_sp, neighb_st) %>% 
+  distinct() %>% 
+  filter(!is.na(neighb_sp))
+
+tip_seqs = metadata %>% 
+  left_join(unite_taxa) %>% 
+  clean_names() %>% 
+  separate(name, into = c("project", "sampleset", "comb_column", "comb_row")) %>% 
+  mutate(comb_column = as.numeric(comb_column)) %>% 
+  select(-project) %>% 
+  left_join(sample_sheet) %>% 
+  left_join(seedlings) %>% 
+  filter(!is.na(seedling_sp))%>% 
+  mutate(tree_div = case_when(
+    seedling_sp == neighb_sp ~1,
+    .default = 2
+  )) %>% 
+  filter(!is.na(phylum)) %>% 
+  mutate(taxonomy = paste(kingdom, phylum, class, order, family, genus, species, sep = ";")) %>% 
+  mutate(sample = paste(sampleset, comb_column, comb_row, sep = "_"))
+
+
+
+fung_df = tip_seqs %>% 
+  select(sample, taxonomy)
+
+write_csv(fung_df, here(folder, "taxa_funguild.csv"))
+#open file with xcel or other spreadsheet software then convert to .txt file at same file path (see below)
+here(folder, "taxa_funguild.txt")
+```
+
+```{bash, engine.opts='-l', eval = F}
+
+python /Users/Gabe/Desktop/phd/FUNGuild-master/Guilds_v1.1.py -otu /Users/Gabe/Desktop/phd/ghecto/data/sanger_data/morpho_dec212023/taxa_funguild.txt 
+```
+
+```{r}
+
+guilds = read_csv(here(folder, "taxa_funguild.guilds.csv")) %>% 
+  clean_names()
+
+tip_all = tip_seqs %>% 
+  left_join(guilds) %>%
+  filter(str_detect(guild, "Ectomycorrhizal")) %>% 
+  mutate(n_splong = case_when(
+    neighb_sp == "Q" ~ "Oak neighbor",
+    neighb_sp == "P" ~ "Pine neighbor"
+  ))
+
+ggplot(tip_all, aes(x = morphotype, fill = genus))+
+  geom_bar()
+ggplot(tip_seqs, aes(x = morphotype, fill = genus))+
+  geom_bar()
+
+ggplot(tip_all, aes(x = morphotype, fill = genus))+
+  geom_bar()+facet_grid(rows = vars(seedling_sp), cols = vars(n_splong))
+
+
+ggplot(tip_seqs, aes(x = morphotype, fill = genus))+
+  geom_bar()+facet_grid(rows = vars(seedling_sp), cols = vars(neighb_sp))
+```
+
+
+
+
+## 
+Now lets combine this dataset with our knowledge of how many samples failed at PCR vs poor Seq quality, etc
+```{r}
+all_attempts  = read_csv(here("data/harvest", "harvest_tipseq_printout.csv")) %>% 
+  mutate(sampleset = "m5x") %>% select(seedling_id, plate, column, row, sampleset, comb_column, comb_row) %>% 
+  bind_rows(read_csv(here("data/harvest", "harvest_tipseq_printout2.csv")) %>% 
+  mutate(sampleset = "m2x") %>% select(seedling_id, plate, column, row, sampleset, comb_column, comb_row)) %>% 
+  bind_rows(read_csv(here("data/harvest", "harvest_tipseq_printout3.csv")) %>% 
+  mutate(sampleset = "m3x") %>% select(seedling_id, plate, column, row, sampleset, comb_column, comb_row)) %>% 
+  bind_rows(read_csv(here("data/harvest", "harvest_tipseq_printout4.csv")) %>% 
+  mutate(sampleset = "m4x") %>% 
+    rename(comb_column = newcolumn, comb_row = newrow) %>% 
+    select(seedling_id, plate, column, row, sampleset, comb_column, comb_row))
+
+
+
+all_seqs = read_csv(here(folder, "all_seqs_untrimmed.csv")) %>% 
+  clean_names()%>% 
+  separate(name, into = c("project", "sampleset", "comb_column", "comb_row")) %>% 
+  mutate(comb_column = as.numeric(comb_column)) %>% 
+  select(-project) %>% 
+  left_join(all_attempts) %>% 
+  left_join(morpho %>%  select(plate, column, row, morphotype))
+
+
+total_df = all_attempts %>% 
+  select(seedling_id, plate, column, row) %>% 
+  left_join(all_seqs) %>% 
+  left_join(tip_all %>% 
+              select(1:3, genus, species, guild, n_splong))  %>% 
+  mutate(genus = str_sub(genus, 4))%>% 
+  mutate(if_genus = case_when(
+    is.na(sequence)~ "PCR Fail",
+    is.na(genus)~ "Bad Seq",
+    .default = genus
+  ))  %>% 
+  left_join(seedlings) %>% 
+  filter(!is.na(seedling_sp)) %>% 
+  mutate(if_genus = fct_relevel(if_genus, "Bad Seq", "PCR Fail", "Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina" )) %>% 
+  mutate(sp_long = case_when(
+    seedling_sp =="Q" ~"Oak seedling",
+    seedling_sp =="P" ~"Bigcone seedling"
+  ))%>% 
+  mutate(nsp_long = case_when(
+    neighb_sp =="Q" ~"Oak neighbor",
+    neighb_sp =="P" ~"Bigcone neighbor"
+  )) %>% 
+  filter(!is.na(morphotype))
+```
+
+
+```{r}
+ggplot(total_df, aes(x = morphotype, fill = if_genus))+
+  geom_bar()+
+  scale_fill_manual(breaks = c("Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina", "Bad Seq", "PCR Fail"),
+                     name = "Genus", values = c("#e65247","#e89923", "#f0dc5d", "#4dc44d", "#4287f5", "darkgray", "gray"))+theme_bw()
+
+
+ggplot(total_df, aes(x = morphotype, fill = if_genus))+
+  geom_bar()+facet_grid(rows = vars(seedling_sp), cols = vars(neighb_sp))+
+  scale_fill_manual(breaks = c("Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina", "Bad Seq", "PCR Fail"),
+                     name = "Genus", values = c("#e65247","#e89923", "#f0dc5d", "#4dc44d", "#4287f5", "darkgray", "gray"))+theme_bw()
+
+ggplot(total_df, aes(x = morphotype, fill = if_genus))+
+  geom_bar()+facet_grid(rows = vars(seedling_sp))+
+  scale_fill_manual(breaks = c("Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina", "Bad Seq", "PCR Fail"),
+                     name = "Genus", values = c("#e65247","#e89923", "#f0dc5d", "#4dc44d", "#4287f5", "darkgray", "gray"))+
+  theme_minimal()
+
+
+
+ggplot(total_df, aes(x = as.factor(seedling_id), fill = if_genus))+lims(y = c(0,4))+
+  geom_bar()+facet_grid(rows = vars(sp_long), cols = vars(nsp_long), scales = "free")+
+  scale_fill_manual(breaks = c("Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina", "Bad Seq", "PCR Fail"),
+                     name = "Genus", values = c("#e65247","#e89923", "#f0dc5d", "#4dc44d", "#4287f5", "darkgray", "gray"))+theme_minimal()+labs(y = "Sequence count", x= "Seedling")+ theme(
+  axis.text.x = element_blank())
+```
+
+LAST TIME: FROM HOLLY- Rethink D,E,H,O,W
+
+
+
+# Is morphotyping just a factor of capturing seqs from the same individual? Or is it representative across the set? 
+```{r}
+ggplot(total_df, aes(x = as.factor(seedling_id), fill = if_genus))+
+  geom_bar()+facet_wrap(~morphotype, scales = "free_x")+
+  scale_fill_manual(breaks = c("Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina", "Bad Seq", "PCR Fail"),
+                     name = "Genus", values = c("#e65247","#e89923", "#f0dc5d", "#4dc44d", "#4287f5", "darkgray", "gray"))+
+  theme_minimal()+ theme(axis.text.x = element_blank())
+
+ggplot(total_df, aes(x = as.factor(seedling_id), fill = if_genus))+
+  geom_bar()+facet_wrap(~morphotype, scales = "free")+
+  scale_fill_manual(breaks = c("Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina", "Bad Seq", "PCR Fail"),
+                     name = "Genus", values = c("#e65247","#e89923", "#f0dc5d", "#4dc44d", "#4287f5", "darkgray", "gray"))+
+  theme_minimal()+ theme(axis.text.x = element_blank())
+
+ggplot(total_df %>% 
+         filter(seedling_sp == "P"), aes(x = as.factor(seedling_id), fill = if_genus))+
+  geom_bar()+facet_wrap(~morphotype, scales = "free")+
+  scale_fill_manual(breaks = c("Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina", "Bad Seq", "PCR Fail"),
+                     name = "Genus", values = c("#e65247","#e89923", "#f0dc5d", "#4dc44d", "#4287f5", "darkgray", "gray"))+
+  theme_minimal()+ theme(axis.text.x = element_blank())
+ggplot(total_df %>% 
+         filter(seedling_sp == "Q"), aes(x = as.factor(seedling_id), fill = if_genus))+
+  geom_bar()+facet_wrap(~morphotype, scales = "free")+
+  scale_fill_manual(breaks = c("Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina", "Bad Seq", "PCR Fail"),
+                     name = "Genus", values = c("#e65247","#e89923", "#f0dc5d", "#4dc44d", "#4287f5", "darkgray", "gray"))+
+  theme_minimal()+ theme(axis.text.x = element_blank())
+
+ggplot(total_df %>% 
+         filter(seedling_sp == "Q") %>% 
+         filter(morphotype =="D"), aes(x = as.factor(seedling_id), fill = if_genus))+
+  geom_bar()+facet_grid(rows = vars(soil_type), cols = vars(neighb_st), scales = "free")+
+  scale_fill_manual(breaks = c("Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina", "Bad Seq", "PCR Fail"),
+                     name = "Genus", values = c("#e65247","#e89923", "#f0dc5d", "#4dc44d", "#4287f5", "darkgray", "gray"))+
+  theme_minimal()+ theme(axis.text.x = element_blank())
+
+
+plot(magick::image_read(here("figures/harvest_morphs.png")))
+
+
+```
+
+
+Thinking about how to use this information:
+
+1. How do I assign morphotypes within the dataset? 
+I think, for those morphotypes with >75% positive ID --> assign
+For <10% IDs (E, N, Y) assign to NM
+For mid % with single genus...
+  Could assign proportionally or at random
+For random ones (D, W), assign proportionally to those species comps? 
+
+```{r}
+treat = read_csv(here("data/design", "seedling_treatments.csv"))
+
+htips = read_csv(here("data/harvest", "harvest_roottips - all.csv"))%>% 
+  pivot_longer(A:H, names_to = "well", values_to = "morphotype" )  %>% 
+  filter(!is.na(morphotype)) %>%
+  mutate(seedling_id = as.numeric(seedling_id)) %>% 
+  left_join(treat) %>% 
+  rename(row = well) %>% 
+  mutate(if_genus = "No Attempt")
+
+ggplot(htips, aes(x = morphotype, fill = morphotype))+
+  geom_bar()+facet_wrap(~seedling_sp)
+
+ggplot(htips %>% 
+         filter(morphotype != "X"), aes(x = morphotype, fill = morphotype))+
+  geom_bar()+facet_wrap(~seedling_sp)
+
+length(total_df$seedling_id[total_df$morphotype=="W"])
+length(total_df$seedling_id[total_df$morphotype=="D"])
+
+total_df_seqs = total_df %>% 
+  mutate(pcr = paste0(plate, column, row))
+
+htips_seqs = htips %>% 
+  mutate(pcr = paste0(plate, column, row)) %>% 
+  filter(!pcr %in% total_df_seqs$pcr)%>% 
+  select(seedling_id, seedling_sp, morphotype, plate, column, row, if_genus)
+  
+alltips_seq = total_df_seqs %>% 
+  select(seedling_id, seedling_sp, morphotype, plate, column, row, if_genus) %>% 
+  bind_rows(htips_seqs)
+
+ggplot(alltips_seq %>% 
+         filter(morphotype %in% c("D", "W")), aes(x = as.factor(seedling_id), fill = if_genus))+
+  geom_bar()+facet_wrap(~morphotype, scales = "free")+
+  scale_fill_manual(breaks = c("Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina", "Bad Seq", "PCR Fail", "No Attempt"),
+                     name = "Genus", values = c("#e65247","#e89923", "#f0dc5d", "#4dc44d", "#4287f5", "darkgray", "gray", "black"))+
+  theme_minimal()+ theme(axis.text.x = element_blank())
+  
+```
+

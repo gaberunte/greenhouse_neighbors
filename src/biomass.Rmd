@@ -13,16 +13,28 @@ library(lubridate)
 library(calecopal)
 library(tidyverse)
 library(dplyr)
+
+gg_soilcolor = scale_color_manual(name = "Soil condition", breaks = c("P", "Q", "C"), 
+                                  labels = c("Bigcone", "Oak", "Control"),
+                                  values = c("#2A0944", "#3FA796", "#FEC260"))
+
+gg_soilfill = scale_fill_manual(name = "Soil condition", breaks = c("P", "Q", "C"), 
+                                  labels = c("Bigcone", "Oak", "Control"),
+                                  values = c("#2A0944", "#3FA796", "#FEC260"))
 ```
 
 ```{r, message=FALSE}
-seedlings = read_csv(here("data", "seedling_measurements.csv")) %>% 
+seedlings = read_csv(here("data", "seedling_measurements", "seedling_measurements.csv")) %>% 
   clean_names()
 
-wet = read_csv(here("data", "ghecto_repotting_destruction.csv")) %>% 
+wet = read_csv(here("data", "repotting", "ghecto_repotting_destruction.csv")) %>% 
   mutate(correction = wet_below_g/(wet_below_g - wet_tips_g))
-dry = read_csv(here("data", "ghecto_repotting_dry_biomass.csv")) %>% 
+dry = read_csv(here("data", "repotting", "ghecto_repotting_dry_biomass.csv")) %>% 
   mutate(seedling_g = bag_with_seedling_g - just_bag_g)
+
+trt = read_csv(here("data", "design", "seedling_treatments.csv"))
+repot_scan = read_csv(here("data/repotting", "seedling_scan_data.csv")) %>% 
+  select(-seedling_sp, -notes)
 ```
 
 
@@ -76,31 +88,26 @@ ggplot(biomass[biomass$seedling_sp=="P",], aes(cohort, above_below)) +
 ```
 
 ```{r}
-oak.b = biomass %>% 
-  filter(seedling_sp == "Q")
-bigcone.b = biomass %>% 
-  filter(seedling_sp == "P")
-
-lm1 = lm(above_below ~seedling_sp*live_soil, data= biomass)
-summary(lm1)
-AIC(lm1)
-
-lm.oak = lm(above_below ~live_soil, data= oak.b)
-summary(lm.oak)
-AIC(lm.oak)
-
-lm.oak = lm(above_below ~soil_type, data= oak.b)
-summary(lm.oak)
-AIC(lm.oak)
+mass = biomass %>% 
+  rename(below = dry_below_corrected, above = dry_above_g) %>%
+  select(seedling_id, below, above) %>% 
+  mutate(total = above+below) %>% 
+  mutate(rs_ratio = below/above) %>% 
+  left_join(repot_scan) %>% 
+  left_join(trt) %>% 
+  mutate(total_area = above_area_cm2+underground_area_cm2) %>% 
+  mutate(rs_area = underground_area_cm2/above_area_cm2)
 
 
-lm.bigcone = lm(above_below ~live_soil, data= bigcone.b)
-summary(lm.bigcone)
-AIC(lm.bigcone)
+ggplot(mass, aes(x = above_area_cm2, y = above, color = soil_type))+
+  geom_point()+geom_smooth(method = "lm")+facet_wrap(~seedling_sp, scales = "free")+gg_soilcolor
 
-lm.bigcone = lm(above_below ~soil_type, data= bigcone.b)
-summary(lm.bigcone)
-AIC(lm.bigcone)
 
+summary(lm(above~above_area_cm2*seedling_sp, data = mass))
+summary(lm(below~underground_area_cm2*seedling_sp, data = mass))
+summary(lm(total~sqrt(total_area)*seedling_sp, data = mass))
+summary(lm(rs_ratio~rs_area*seedling_sp, data = mass))
 ```
+
+
 

@@ -1,0 +1,181 @@
+---
+title: "Harvest cohort analysis"
+author: "Gabe Runte"
+date: "2023-12-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(vegan)
+library(here)
+library(janitor)
+library(gridExtra)
+library(RColorBrewer)
+library(tidyverse)
+```
+
+```{r}
+master = read_csv(here("data/harvest", "harvest_tipsheet.csv"))
+harvest_tips = read_csv(here("data/harvest", "harvest_roottips - all.csv")) %>% 
+  pivot_longer(cols = 6:13,names_to = "row", values_to = "morphotype") %>% 
+  filter(!is.na(morphotype))
+neighbor_wide = read_csv(here("data/design", "ghecto_neighbor_pairs.csv"))
+neighbors = neighbor_wide %>% 
+  rename(seedling_id = seedling_1, neighbor = seedling_2) %>% 
+  bind_rows(neighbor_wide%>% 
+              rename(seedling_id = seedling_2, neighbor = seedling_1))
+seedling_trt = read_csv(here("data/design", "seedling_treatments.csv"))
+
+seedlings = seedling_trt %>% 
+  left_join(neighbors) %>% 
+  drop_na() %>% 
+  left_join(seedling_trt %>% 
+              rename(neighbor = seedling_id, n_sp = seedling_sp, n_st = soil_type))
+```
+
+
+```{r}
+ggplot(master, aes(x = morphotype, fill = if_genus))+
+  geom_bar()+facet_grid(cols = vars(seedling_sp), rows = vars(soil_type), scales = "free")+
+  scale_fill_manual(breaks = c("Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina", "Bad Seq", "PCR Fail"),
+                     name = "Genus", values = c("#e65247","#e89923", "#f0dc5d", "#4dc44d", "#4287f5", "darkgray", "gray"))+
+  theme_minimal()
+```
+
+
+```{r}
+ggplot(master %>% 
+         filter(seedling_sp == "Q"), aes(x = morphotype, fill = if_genus))+
+  geom_bar()+facet_grid(cols = vars(neighb_sp), rows = vars(soil_type), scales = "free")+
+  scale_fill_manual(breaks = c("Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina", "Bad Seq", "PCR Fail"),
+                     name = "Genus", values = c("#e65247","#e89923", "#f0dc5d", "#4dc44d", "#4287f5", "darkgray", "gray"))+
+  theme_minimal()
+
+ggplot(master %>% 
+         filter(seedling_sp == "P"), aes(x = morphotype, fill = if_genus))+
+  geom_bar()+facet_grid(cols = vars(neighb_sp), rows = vars(soil_type), scales = "free")+
+  scale_fill_manual(breaks = c("Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina", "Bad Seq", "PCR Fail"),
+                     name = "Genus", values = c("#e65247","#e89923", "#f0dc5d", "#4dc44d", "#4287f5", "darkgray", "gray"))+
+  theme_minimal()
+```
+
+
+```{r}
+ggplot(master %>% 
+         filter(morphotype == "A"), aes(x = soil_type, fill = if_genus))+
+  geom_bar()+facet_grid(cols = vars(neighb_sp), rows = vars(neighb_st), scales = "free")+
+  scale_fill_manual(breaks = c("Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina", "Bad Seq", "PCR Fail"),
+                     name = "Genus", values = c("#e65247","#e89923", "#f0dc5d", "#4dc44d", "#4287f5", "darkgray", "gray"))+
+  theme_minimal()
+ggplot(master %>% 
+         filter(morphotype == "B"), aes(x = soil_type, fill = if_genus))+
+  geom_bar()+facet_grid(cols = vars(neighb_sp), rows = vars(neighb_st), scales = "free")+
+  scale_fill_manual(breaks = c("Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina", "Bad Seq", "PCR Fail"),
+                     name = "Genus", values = c("#e65247","#e89923", "#f0dc5d", "#4dc44d", "#4287f5", "darkgray", "gray"))+
+  theme_minimal()
+ggplot(master %>% 
+         filter(morphotype == "C"), aes(x = soil_type, fill = if_genus))+
+  geom_bar()+facet_grid(cols = vars(neighb_sp), rows = vars(neighb_st), scales = "free")+
+  scale_fill_manual(breaks = c("Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina", "Bad Seq", "PCR Fail"),
+                     name = "Genus", values = c("#e65247","#e89923", "#f0dc5d", "#4dc44d", "#4287f5", "darkgray", "gray"))+
+  theme_minimal()
+ggplot(master %>% 
+         filter(morphotype == "D"), aes(x = soil_type, fill = if_genus, color = as.factor(seedling_id)))+
+  geom_bar()+facet_grid(cols = vars(neighb_sp), rows = vars(neighb_st), scales = "free")+
+  scale_fill_manual(breaks = c("Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina", "Bad Seq", "PCR Fail"),
+                     name = "Genus", values = c("#e65247","#e89923", "#f0dc5d", "#4dc44d", "#4287f5", "darkgray", "gray"))+
+  theme_minimal()
+ggplot(master %>% 
+         filter(morphotype == "E"), aes(x = soil_type, fill = if_genus))+
+  geom_bar()+facet_grid(cols = vars(neighb_sp), rows = vars(neighb_st), scales = "free")+
+  scale_fill_manual(breaks = c("Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina", "Bad Seq", "PCR Fail"),
+                     name = "Genus", values = c("#e65247","#e89923", "#f0dc5d", "#4dc44d", "#4287f5", "darkgray", "gray"))+
+  theme_minimal()
+ggplot(master %>% 
+         filter(morphotype == "F"), aes(x = soil_type, fill = if_genus))+
+  geom_bar()+facet_grid(cols = vars(neighb_sp), rows = vars(neighb_st), scales = "free")+
+  scale_fill_manual(breaks = c("Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina", "Bad Seq", "PCR Fail"),
+                     name = "Genus", values = c("#e65247","#e89923", "#f0dc5d", "#4dc44d", "#4287f5", "darkgray", "gray"))+
+  theme_minimal()
+ggplot(master %>% 
+         filter(morphotype == "G"), aes(x = soil_type, fill = if_genus))+
+  geom_bar()+facet_grid(cols = vars(neighb_sp), rows = vars(neighb_st), scales = "free")+
+  scale_fill_manual(breaks = c("Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina", "Bad Seq", "PCR Fail"),
+                     name = "Genus", values = c("#e65247","#e89923", "#f0dc5d", "#4dc44d", "#4287f5", "darkgray", "gray"))+
+  theme_minimal()
+ggplot(master %>% 
+         filter(morphotype == "O"), aes(x = soil_type, fill = if_genus))+
+  geom_bar()+facet_grid(cols = vars(neighb_sp), rows = vars(neighb_st), scales = "free")+
+  scale_fill_manual(breaks = c("Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina", "Bad Seq", "PCR Fail"),
+                     name = "Genus", values = c("#e65247","#e89923", "#f0dc5d", "#4dc44d", "#4287f5", "darkgray", "gray"))+
+  theme_minimal()
+ggplot(master %>% 
+         filter(morphotype == "W"), aes(x = soil_type, fill = if_genus))+
+  geom_bar()+facet_grid(cols = vars(neighb_sp), rows = vars(neighb_st), scales = "free")+
+  scale_fill_manual(breaks = c("Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina", "Bad Seq", "PCR Fail"),
+                     name = "Genus", values = c("#e65247","#e89923", "#f0dc5d", "#4dc44d", "#4287f5", "darkgray", "gray"))+
+  theme_minimal()
+ggplot(master %>% 
+         filter(morphotype == "X"), aes(x = soil_type, fill = if_genus))+
+  geom_bar()+facet_grid(cols = vars(neighb_sp), rows = vars(neighb_st), scales = "free")+
+  scale_fill_manual(breaks = c("Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina", "Bad Seq", "PCR Fail"),
+                     name = "Genus", values = c("#e65247","#e89923", "#f0dc5d", "#4dc44d", "#4287f5", "darkgray", "gray"))+
+  theme_minimal()
+ggplot(master %>% 
+         filter(morphotype == "Y"), aes(x = soil_type, fill = if_genus))+
+  geom_bar()+facet_grid(cols = vars(neighb_sp), rows = vars(neighb_st), scales = "free")+
+  scale_fill_manual(breaks = c("Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina", "Bad Seq", "PCR Fail"),
+                     name = "Genus", values = c("#e65247","#e89923", "#f0dc5d", "#4dc44d", "#4287f5", "darkgray", "gray"))+
+  theme_minimal()
+ggplot(master %>% 
+         filter(morphotype == "Z"), aes(x = soil_type, fill = if_genus))+
+  geom_bar()+facet_grid(cols = vars(neighb_sp), rows = vars(neighb_st), scales = "free")+
+  scale_fill_manual(breaks = c("Melanogaster", "Pustularia", "Rhizopogon", "Tuber", "Wilcoxina", "Bad Seq", "PCR Fail"),
+                     name = "Genus", values = c("#e65247","#e89923", "#f0dc5d", "#4dc44d", "#4287f5", "darkgray", "gray"))+
+  theme_minimal()
+```
+What we can say:
+- A is pustularia
+- B is Tuber
+- C is really rare (n=1) and is rhizopogon
+- D is pustularia in bigcone soil and tuber/wilcoxina in oak soil (tuber OK based on written notes)
+- E is rare and does not sequence well
+- F is Pustularia
+- G is pustularia
+- O are uncolonized
+- W are Rhizopogon (based on written notes)
+- X is Rhizopogon with neighbor bigcone, nothing when neighbor oak
+- Y NEED TO DO THIS
+- Z is pustularia
+
+
+
+```{r}
+seq_cohorts = master %>% 
+  rename(n_st = neighb_st, n_sp = neighb_sp)%>% 
+  group_by(seedling_sp, soil_type, n_sp, n_st, morphotype) %>% 
+  summarize(n_seqs = n())
+
+cohorts = harvest_tips %>% 
+  mutate(seedling_id = as.numeric(seedling_id)) %>% 
+  left_join(seedlings) %>% 
+  group_by(seedling_sp, soil_type, n_sp, n_st, morphotype) %>% 
+  summarize(n = n()) %>% 
+  drop_na() %>% 
+  left_join(seq_cohorts) %>% 
+  mutate(pct_seq = n_seqs/n)
+
+
+```
+
+```{r}
+seq_ytips = harvest_tips %>% 
+  filter(morphotype == "Y") %>% 
+  filter(!seedling_id %in% master$seedling_id[master$morphotype=="Y"]) %>% 
+  group_by(seedling_id) %>% 
+  sample_n(2)
+
+#write_csv(seq_ytips, here("data/harvest", "seq_ymorph.csv"))
+```
+

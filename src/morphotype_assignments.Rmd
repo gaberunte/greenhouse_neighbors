@@ -1,0 +1,927 @@
+---
+title: "morphotype assignments"
+author: "Gabe Runte"
+date: "2024-01-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(RColorBrewer)
+library(vegan)
+library(here)
+library(janitor)
+library(gridExtra)
+library(tidyverse)
+source(here("src", "colors.R"))
+```
+
+## Read in the sequence processing data
+
+```{r}
+folder = here("data/sanger_data/total_project")
+
+seq_data = read_csv(here(folder, "full_project_sangerdata.csv")) %>% 
+  clean_names()
+
+repot = seq_data %>% filter(timepoint == "repot")
+harvest = seq_data %>% filter(timepoint == "harvest")
+
+master = read_csv(here("data/seedling_measurements", "size_master.csv")) %>% 
+  select(1, 10:15) %>%  
+  drop_na() %>% distinct()
+
+trt = read_csv(here("data", "design", "seedling_treatments.csv"))
+measure = read_csv(here("data", "analysis/size_master.csv"))
+total_treat = measure %>% 
+  select(seedling_id, seedling_sp, soil_type, neighbor, neighb_sp, neighb_st, pot) %>% distinct() %>% drop_na()
+```
+
+## Read in the lab tip data
+
+```{r, message = F}
+treat = read_csv(here("data/design", "seedling_treatments.csv"))
+
+repot_tips = read_csv(here("data", "repotting", "ghecto_repotting_root_pulling_data.csv"))%>%   pivot_longer(A:H, names_to = "row", values_to = "morphotype" )  %>% 
+  filter(!is.na(morphotype)) %>% 
+  left_join(treat)%>% 
+  mutate(morphotype = str_sub(morphotype, 1,1))%>% 
+  select(seedling_id, soil_type, seedling_sp, plate, column, row, morphotype)
+
+repot_colonization = read_csv(here("data", "repotting", "ghecto_repotting_root_pulling_data.csv")) %>% 
+  mutate(prop_colonized = colonization_numerator/colonization_denominator) %>% 
+  mutate(prop_colonized = case_when(
+    is.na(prop_colonized)~0,
+    .default = prop_colonized))%>% 
+  select(seedling_id, prop_colonized)
+
+harvest_tips = read_csv(here("data/harvest", "harvest_roottips - all.csv"))%>%   pivot_longer(A:H, names_to = "row", values_to = "morphotype" )  %>% 
+  filter(!is.na(morphotype)) %>% 
+  mutate(seedling_id = as.numeric(seedling_id)) %>% 
+  left_join(treat)%>% 
+  mutate(morphotype = str_sub(morphotype, 1,1))%>% 
+  select(seedling_id, soil_type, seedling_sp, plate, column, row, morphotype)
+
+harvest_colonization = read_csv(here("data/harvest", "harvest_roottips - all.csv"))%>% 
+  mutate(prop_colonized = colonized/(colonized+uncolonized)) %>% 
+  mutate(prop_colonized = case_when(
+    is.na(prop_colonized)~0,
+    .default = prop_colonized)) %>% 
+  select(seedling_id, prop_colonized)
+```
+
+
+I will start at the repotting timepoint since I expect it to be more straight-forward than the harvest set. 
+
+```{r}
+# How many tips did we sample from each species x soil type cohort?
+repot_cohorts = repot_tips %>% 
+  group_by(seedling_sp, soil_type) %>% 
+  summarise(n_total = n()) 
+
+# How many tips were assigned to each species x morphotype?
+repot_sp_morphs = repot_tips %>% 
+  group_by(seedling_sp, morphotype) %>% 
+  summarise(n_total = n()) 
+
+repot_spsoil_morphs = repot_tips %>% 
+  group_by(seedling_sp, morphotype, soil_type) %>% 
+  summarise(n_total = n()) 
+  
+# How many tips were assigned to each species x soil x morphotype and what percent of the total assigned tips was that for the species x soil?
+repot_morphs = repot_tips %>% 
+  select(seedling_sp, soil_type, morphotype) %>% 
+  group_by(seedling_sp, soil_type, morphotype) %>% 
+  summarise(count = n()) %>% 
+  left_join(repot_cohorts) %>% 
+  mutate(freq = count/n_total)
+
+repot_hqmorphs = repot %>%
+  filter(str_detect(guild, "Ectomycorrhizal")) %>% 
+  select(plate, column, row, seedling_id, seedling_sp, soil_type, morphotype, genus, species) %>% filter(!is.na(genus))
+
+spp_consensus <- repot_hqmorphs %>%
+  group_by(seedling_sp, morphotype) %>%
+  summarise(
+    consensus_value = names(sort(table(genus), decreasing = TRUE))[1],
+    pct_agreement = max(table(genus)) / n() * 100,
+    seq_count = n()
+  ) %>% 
+  left_join(repot_sp_morphs)%>% 
+  mutate(coverage = seq_count/n_total)
+
+
+sppsoil_consensus <- repot_hqmorphs %>%
+  group_by(seedling_sp, soil_type, morphotype) %>%
+  summarise(
+    consensus_value = names(sort(table(genus), decreasing = TRUE))[1],
+    pct_agreement = max(table(genus)) / n() * 100,
+    seq_count = n()
+  ) %>% 
+  left_join(repot_spsoil_morphs) %>% 
+  mutate(coverage = seq_count/n_total)
+```
+
+Before I begin assigning species, I want to remove any non-mycorrhizal or dead tips from the set. 
+```{r}
+# From our notes, these cohorts were expected to be tossed but were assessed just in case
+#(see available plot in commented-out line below for a photo of our notes from the repotting step)
+  #plot(magick::image_rotate(magick::image_read(here("figures/repot_morphs.jpeg")),90))
+
+repot_deadtips = tibble(
+  morphotype = c("F", "Q"),
+  expect_nm = TRUE ) 
+
+# If coverage at the species level is < 5% after all of the PCR and sequencing attempts, I will assume that these expected dead morphotypes are in-fact dead. 
+
+spp_consensus 
+```
+
+
+```{r}
+ggplot(repot_hqmorphs , aes(x = as.factor(seedling_id), fill = genus))+
+  geom_bar()+facet_grid(cols = vars(morphotype), rows = vars(soil_type), scales = "free")
+
+ggplot(repot_hqmorphs %>% filter(seedling_sp =="P"), aes(x = as.factor(seedling_id), fill = genus))+
+  geom_bar()+facet_grid(cols = vars(morphotype), rows = vars(soil_type), scales = "free")
+
+ggplot(repot_hqmorphs %>% filter(seedling_sp =="Q"), aes(x = as.factor(seedling_id), fill = genus))+
+  geom_bar()+facet_grid(cols = vars(morphotype), rows = vars(soil_type), scales = "free")
+
+```
+Following this figure: 
+G is Rhizopogon hawkerae
+M is Rhizopogon in P soil and 50:50 Rhizopogon:Suillus in Q soil
+The rest of the P soil tips are Pustularia
+Contamination is very rare in C soil with only 1 tree showing Hebeloma. The Rhizopogon calls may be cross-contamination as it is a very common sequence. 
+
+
+```{r}
+ggplot(repot_hqmorphs %>% filter(soil_type == "Q"), aes(x = as.factor(seedling_id), fill = genus))+
+  geom_bar()+facet_grid(cols = vars(morphotype), rows = vars(seedling_sp), scales = "free")
+```
+In Bigcones:
+A is Rhizo
+J is Pustularia, Tuber likely contamination as this is only instance
+
+In Oaks (it is not clean...):
+A is cenococum based on notes. Likely failing to amplify often
+B/D/L all pustularia based on notes
+C is Pustularia and Peziza
+N is tuber
+
+
+Let's write this out in code:
+```{r}
+repot_assignments = repot_tips %>% 
+  select(seedling_sp, soil_type, morphotype) %>% 
+  distinct() %>% 
+  mutate(assignment = case_when(
+    morphotype %in% c("F", "Q", "E") ~ "NM", #non-mycorrhizal
+    soil_type == "C" ~ "NM",
+    morphotype == "G" ~ "Rhizopogon hawkerae",
+    morphotype == "M" & soil_type == "P" ~ "Rhizopogon hawkerae",
+    morphotype == "M" & soil_type == "P" ~ "Rhizopogon hawkerae",
+    morphotype == "M" & soil_type == "Q" ~ "Rhizopogon hawkerae or Suillus lakei",
+    soil_type == "P" ~ "Pustularia sp.", 
+    morphotype == "A" & soil_type == "Q" & seedling_sp == "P" ~ "Rhizopogon hawkerae", 
+    morphotype == "J" & soil_type == "Q" & seedling_sp == "P" ~ "Pustularia sp.",
+    morphotype == "A" & soil_type == "Q" & seedling_sp == "Q" ~ "Cenococcum sp.",
+    morphotype %in% c("B", "D", "L") & soil_type == "Q" & seedling_sp == "Q" ~ "Pustularia sp.",
+    morphotype == "C" & soil_type == "Q" & seedling_sp == "Q" ~ "Pustularia sp. or Peziza sp.",
+    morphotype == "N" & soil_type == "Q" & seedling_sp == "Q" ~ "Tuber candidum",
+    .default = "NM" # The morphotypes that did not make it through the quality filters
+  ))
+
+
+```
+
+
+Moving onto the Harvest timepoint
+
+```{r}
+ggplot(harvest, aes(x = as.factor(seedling_id), fill = genus))+
+  geom_bar()+facet_grid(cols = vars(morphotype), rows = vars(soil_type), scales = "free")
+
+harvest_assignments = harvest_tips %>% 
+  select(seedling_sp, soil_type, morphotype) %>% 
+  distinct() %>% 
+  mutate(assignment = case_when(
+    morphotype == "A" ~ "Pustularia sp.",
+    morphotype == "B" ~ "Tuber sp.",
+    morphotype == "C" ~ "Rhizopogon hawkerae",
+    morphotype == "D" & soil_type == "P" ~ "Pustularia sp.",
+    morphotype == "D" & soil_type == "Q" ~ "Tuber sp.",
+    soil_type == "E" ~ "NM", 
+    morphotype == "F" ~ "Pustularia sp.", 
+    morphotype == "G" ~ "Pustularia sp.", 
+    morphotype == "H" ~ "Melanogaster sp.",   
+    morphotype == "O" ~ "Pustularia sp.", 
+    morphotype == "W" ~ "NM", 
+    morphotype == "X" ~ "Rhizopogon hawkerae", 
+    morphotype == "Z" ~ "Pustularia sp.",
+    .default = "NM" # The morphotypes that did not make it through the quality filters
+  ))
+```
+
+```{r, eval = F}
+write_csv(repot_assignments, here("data", "repotting", "repot_morphotype_assignments.csv"))
+write_csv(harvest_assignments, here("data", "harvest", "harvest_morphotype_assignments.csv"))
+```
+
+While we are here, let's also make a species abundance matrix for each of the timepoints
+```{r}
+## The code below attaches the actual species assignments onto the samples that have them. 
+
+repot_seqsamples = repot %>%
+  mutate(percent_hq = as.numeric(str_sub(percent_hq, 1, -2))) %>% 
+  filter(percent_hq >2) %>% 
+  mutate(tax_assign = case_when(
+    is.na(species) ~ paste0(str_sub(genus, 4), " sp."),
+    !is.na(species) ~ paste0(str_sub(genus, 4), " ", str_sub(species, 4)))) %>% 
+  select(plate, column, row, tax_assign)
+
+repot_table = repot_tips %>% 
+  left_join(repot_assignments) %>% 
+  left_join(repot_seqsamples)
+
+# On second thought, though, I do not think this is the best way to do this. I should treat all trees the same way based on the assignments I have given their morphotypes. Otherwise samples with sequencing data are likely to be biased in the direction of greater diversity. 
+
+# This df quantifies the number of tips pulled and the number of tips that ended up being ecto for each seedling. This will help us create a scaled community table
+repot_reps = repot_tips  %>% 
+  group_by(seedling_id) %>% 
+  summarize(pulled_tips = n()) %>% 
+  left_join(repot_tips %>%
+  filter(morphotype %in% repot_assignments$morphotype[repot_assignments$assignment != "NM"]) %>% 
+    group_by(seedling_id) %>% 
+    summarize(ecto_tips = n())) %>% 
+  mutate(ecto_tips = case_when(
+    is.na(ecto_tips) ~ 0, 
+    .default = ecto_tips
+  )) %>% 
+  mutate(prop_assign = ecto_tips/pulled_tips)
+
+repot_table = repot_tips %>% 
+  left_join(repot_assignments) %>% 
+  filter(assignment != "NM") %>% 
+  group_by(seedling_id, assignment) %>% 
+  summarize(count = n()) %>% 
+  pivot_wider(names_from = assignment, values_from = count, values_fill = 0) %>% 
+  clean_names() %>% 
+  mutate(pustularia_sp = pustularia_sp + 0.5*pustularia_sp_or_peziza_sp)%>% 
+  mutate(peziza_sp = 0.5*pustularia_sp_or_peziza_sp) %>% 
+  mutate(rhizopogon_hawkerae = rhizopogon_hawkerae + 0.5*rhizopogon_hawkerae_or_suillus_lakei)%>% 
+  mutate(suillus_lakei = 0.5*rhizopogon_hawkerae_or_suillus_lakei) %>% 
+  select(-pustularia_sp_or_peziza_sp, -rhizopogon_hawkerae_or_suillus_lakei) %>% 
+  left_join(repot_reps) %>% 
+  left_join(repot_colonization) 
+
+repot_table_scaled = repot_table %>% 
+  mutate(scalar = prop_assign*prop_colonized) %>% 
+  mutate(pustularia_sp = pustularia_sp/ecto_tips*scalar)%>% 
+  mutate(tuber_candidum = tuber_candidum/ecto_tips*scalar)%>% 
+  mutate(cenococcum_sp = cenococcum_sp/ecto_tips*scalar)%>% 
+  mutate(rhizopogon_hawkerae = rhizopogon_hawkerae/ecto_tips*scalar)%>% 
+  mutate(peziza_sp = peziza_sp/ecto_tips*scalar)%>% 
+  mutate(suillus_lakei = suillus_lakei/ecto_tips*scalar) %>% 
+  select(1:7) %>% 
+  drop_na()%>% 
+  mutate(richness = rowSums(across(pustularia_sp:suillus_lakei, ~ . > 0, .names = "greater0_{.col}")))
+# Now I need to assign the 'or' columns to their potential columns randomly
+
+```
+
+
+```{r}
+harvest_reps = harvest_tips  %>% 
+  group_by(seedling_id) %>% 
+  summarize(pulled_tips = n()) %>% 
+  left_join(harvest_tips %>%
+  filter(morphotype %in% harvest_assignments$morphotype[harvest_assignments$assignment != "NM"]) %>% 
+    group_by(seedling_id) %>% 
+    summarize(ecto_tips = n())) %>% 
+  mutate(ecto_tips = case_when(
+    is.na(ecto_tips) ~ 0, 
+    .default = ecto_tips
+  )) %>% 
+  mutate(prop_assign = ecto_tips/pulled_tips)
+
+harvest_table = harvest_tips %>% 
+  left_join(harvest_assignments) %>% 
+  filter(assignment != "NM") %>% 
+  group_by(seedling_id, assignment) %>% 
+  summarize(count = n()) %>% 
+  pivot_wider(names_from = assignment, values_from = count, values_fill = 0) %>% 
+  clean_names()  %>% 
+  left_join(harvest_reps) %>% 
+  left_join(harvest_colonization %>% mutate(seedling_id = as.numeric(seedling_id)))
+# Now I need to assign the 'or' columns to their potential columns randomly
+
+harvest_table_scaled = harvest_table %>% 
+  mutate(scalar = prop_assign*prop_colonized) %>% 
+  mutate(pustularia_sp = pustularia_sp/ecto_tips*scalar)%>% 
+  mutate(tuber_sp = tuber_sp/ecto_tips*scalar)%>% 
+  mutate(rhizopogon_hawkerae = rhizopogon_hawkerae/ecto_tips*scalar)%>% 
+  mutate(melanogaster_sp = melanogaster_sp/ecto_tips*scalar)%>% 
+  select(1:5) %>% 
+  drop_na() %>% 
+  mutate(richness = rowSums(across(pustularia_sp:melanogaster_sp, ~ . > 0, .names = "greater0_{.col}")))
+
+harvest_diversity = diversity(harvest_table[,2:5], index = "invsimpson")
+
+names(harvest_table_scaled)
+  
+```
+
+```{r, eval = F}
+write_csv(repot_table, here("data", "repotting", "repot_community_matrix.csv"))
+write_csv(harvest_table, here("data", "harvest", "harvest_community_matrix.csv"))
+
+write_csv(repot_table_scaled, here("data", "repotting", "repot_community_matrix_scaled.csv"))
+write_csv(harvest_table_scaled, here("data", "harvest", "harvest_community_matrix_scaled.csv"))
+```
+
+```{r}
+names(repot_table_scaled)
+
+mdstable = repot_table_scaled %>%
+  mutate(sum = pustularia_sp+tuber_candidum+cenococcum_sp+rhizopogon_hawkerae+peziza_sp+suillus_lakei) %>% 
+  filter(sum>0) %>% 
+  select(-sum) %>% 
+  select(-seedling_id)
+
+repot_dist = vegdist(mdstable)
+
+repot_mds = metaMDS(repot_dist, distance = "bray")
+
+goodness(repot_mds)
+stressplot(repot_mds)
+plot(repot_mds)
+mds1.vec = as.vector(repot_mds$points[,1])
+mds2.vec = as.vector(repot_mds$points[,2])
+
+repot_mds_df = tibble(seedling_id = repot_table_scaled$seedling_id, m1 = mds1.vec,m2 = mds1.vec )
+
+repot_mdsplot = repot_table_scaled  %>% 
+  left_join(repot_mds_df) %>% 
+  left_join(treat)
+
+ggplot(repot_mdsplot, aes(x = m1, y = m2, color = soil_type, shape = seedling_sp))+
+  geom_
+```
+
+
+Really difficult to know what to do with this data. Not really possible to plot on a plane. Diversity does not make sense as a metric to calculate. 
+
+
+## Richness assessments
+Let's see what happens is we count the total fungal richness into the pot and at the end of the experiment...
+```{r}
+potlist = read_csv(here("data/design", "ghecto_neighbor_pairs.csv"))
+
+richness_in = repot_table_scaled %>% 
+  select(seedling_id, richness)
+
+repot_pot = potlist %>% 
+  left_join(richness_in %>% rename(seedling_1 = seedling_id, richness_1 = richness))%>% 
+  left_join(richness_in %>% rename(seedling_2 = seedling_id, richness_2 = richness)) %>% 
+  left_join(treat %>% rename(seedling_1 = seedling_id, st1 = soil_type, sp1 = seedling_sp) %>% select(seedling_1, st1, sp1))%>% 
+  left_join(treat %>% rename(seedling_2 = seedling_id, st2 = soil_type, sp2 = seedling_sp) %>% select(seedling_2, st2, sp2)) %>% 
+  mutate(richness_1 = case_when(
+    st1 == "C" ~ 0,
+    .default = richness_1))%>% 
+  mutate(richness_2 = case_when(
+    st2 == "C" ~ 0,
+    .default = richness_2)) %>% 
+  drop_na() %>% 
+  mutate(pot_fungi = richness_1+richness_2)
+
+
+richness_out = harvest_table_scaled %>% 
+  select(seedling_id, richness)
+
+harvest_pot = potlist %>% 
+  left_join(richness_out %>% rename(seedling_1 = seedling_id, richness_1 = richness))%>% 
+  left_join(richness_out %>% rename(seedling_2 = seedling_id, richness_2 = richness)) %>% 
+  left_join(treat %>% rename(seedling_1 = seedling_id, st1 = soil_type, sp1 = seedling_sp) %>% select(seedling_1, st1, sp1))%>% 
+  left_join(treat %>% rename(seedling_2 = seedling_id, st2 = soil_type, sp2 = seedling_sp) %>% select(seedling_2, st2, sp2)) %>% 
+  mutate(pot_fungi = richness_1+richness_2)
+
+
+pot_timeline = repot_pot %>% 
+  rename(fungi_in = pot_fungi) %>% 
+  select(pot, fungi_in) %>% 
+  left_join(harvest_pot %>% 
+              rename(fungi_out = pot_fungi) %>% 
+              select(pot, fungi_out)) %>% 
+  drop_na()
+
+## This is really defeating... there is absolutely nothing I can do with this data the way I am structuring it. I need to go back to the drawing board on this one. 
+```
+
+
+```{r}
+h_scaledlong = harvest_table_scaled %>% 
+  select(-richness) %>% 
+  mutate(nonmycorrhizal = 1 - pustularia_sp- tuber_sp-rhizopogon_hawkerae-melanogaster_sp) %>% 
+  pivot_longer(cols = 2:5, names_to =  "taxon", values_to = "percent") %>% 
+  left_join(master) %>% 
+  drop_na()
+
+h_p = h_scaledlong %>% 
+  filter(seedling_sp == "P") %>% 
+  filter(percent>0)
+
+ggplot(h_scaledlong %>% 
+         filter(seedling_sp == "P"), aes(x = as.factor(seedling_id), y = percent, fill = taxon))+
+  geom_bar(stat = "identity")+facet_grid(cols = vars(soil_type), rows = vars(neighb_st), scales = "free")
+
+ggplot(h_scaledlong %>% 
+         filter(seedling_sp == "Q"), aes(x = as.factor(seedling_id), y = percent, fill = taxon, color = neighb_sp))+
+  geom_bar(stat = "identity")+facet_grid(cols = vars(soil_type), rows = vars(neighb_st), scales = "free")
+```
+
+
+Does pct colonization predict harvest pct colonization? 
+How about whether or not neighbor colonization rate predicts control seedling colonization rate? 
+
+```{r}
+repot_colonization
+harvest_colonization
+
+master
+
+colset = repot_colonization %>%
+  rename(repot_col = prop_colonized) %>% 
+  left_join(harvest_colonization%>%
+  rename(harvest_col = prop_colonized)%>%  mutate(seedling_id = as.numeric(seedling_id))) %>% 
+  left_join(master) %>% 
+  left_join(repot_colonization %>%  rename(neighbor = seedling_id, neighb_repotcol = prop_colonized)) %>% 
+  filter(repot_col <1)
+
+ggplot(colset %>% 
+         filter(soil_type != "C"), aes(x = repot_col, y = harvest_col, color = seedling_sp))+geom_point()+geom_smooth(method = "lm")
+
+ggplot(colset %>% 
+         filter(soil_type == "C"), aes(x = neighb_repotcol, y = harvest_col, color = seedling_sp))
+
+
+ggplot(colset %>% 
+         filter(!is.na(soil_type)) %>% 
+         filter(!is.na(seedling_sp)), aes(x = soil_type, y = harvest_col, fill = neighb_sp))+
+  geom_boxplot()+facet_wrap(~seedling_sp)
+
+# Does this plot hint at the idea that you benefit from growing next to a seedling from the soil you were conditioned in? 
+```
+
+```{r}
+imagedata = read_csv(here("data", "wide_final_seedling_area.csv")) %>% 
+  left_join(master) %>% 
+  left_join(colset)
+
+ggplot(imagedata %>% 
+         filter(ab_ratio <1) %>% 
+         filter(!is.na(soil_type)) %>% 
+         filter(!is.na(seedling_sp)), aes(x = soil_type, y = ab_ratio, fill = neighb_sp))+
+  geom_boxplot()+facet_wrap(~seedling_sp)
+
+ggplot(imagedata %>% 
+         filter(ab_ratio <1) %>% 
+         filter(!is.na(soil_type)) %>% 
+         filter(!is.na(seedling_sp)), aes(x = soil_type, y = total_size, fill = neighb_sp))+
+  geom_boxplot()+facet_wrap(~seedling_sp)
+
+ggplot(imagedata %>% 
+         filter(ab_ratio <1) %>% 
+         filter(!is.na(soil_type)) %>% 
+         filter(!is.na(seedling_sp)), aes(x = soil_type, y = belowground*harvest_col, fill = neighb_sp))+
+  geom_boxplot()+facet_wrap(~seedling_sp)
+
+```
+
+Making colonization tables for seedlings without colonization
+
+```{r}
+harvest_table_scaled
+
+
+harvest_table_all = read_csv(here("data/harvest", "harvest_roottips - all.csv")) %>% 
+  filter(!is.na(seedling_id)) %>% 
+  mutate(seedling_id = as.numeric(seedling_id)) %>% 
+  filter(!seedling_id %in% harvest_table_scaled$seedling_id) %>% 
+  select(1) %>% 
+  mutate(pustularia_sp = 0, tuber_sp = 0, rhizopogon_hawkerae = 0, melanogaster_sp = 0, richness = 0) %>% 
+  bind_rows(harvest_table_scaled) 
+
+tip_comms = harvest_table_all%>% 
+  left_join(total_treat) %>% 
+  pivot_longer(cols = 2:5, names_to = "taxon", values_to = "pct_col")%>% 
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Control soil"
+  ))%>% 
+  filter(!is.na(seedling_sp))
+
+tipsum = tip_comms %>% 
+  group_by(seedling_sp, soil_type, taxon) %>% 
+  summarize(pct = mean(pct_col),
+            sd_col = sd(pct_col)) %>% 
+  mutate(Taxon = case_when(
+    taxon == "cenococcum_sp" ~"Cenococcum sp.",
+    taxon == "peziza_sp" ~"Peziza sp.",
+    taxon == "pustularia_sp" ~"Pustularia sp.",
+    taxon == "rhizopogon_hawkerae" ~"Rhizopogon hawkerae",
+    taxon == "melanogaster_sp" ~"Melanogaster sp.",
+    taxon == "tuber_sp" ~"Tuber sp."
+  ))%>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  ))%>% 
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Sterile soil"
+  ))
+
+library(viridis)
+
+
+harvest_tipcomms = ggplot(tipsum, aes(x = st_long, y = pct, fill = Taxon))+
+  geom_bar(stat = "identity")+facet_wrap(~sp_long)+theme_minimal()+
+  labs(x = "Soil type", y = "Average percent colonization")+
+  scale_fill_viridis(discrete = TRUE)
+
+harvest_tipcomms = ggplot(tipsum, aes(x = st_long, y = pct, fill = Taxon))+
+  geom_bar(stat = "identity")+facet_wrap(~sp_long)+theme_minimal()+
+  labs(x = "Initial soil conditioning", y = "Average percent colonization")+
+  scale_fill_manual(values = c("#edae93",  "#93b071",  "#598f91", "#0c3547")) 
+
+# save_plot(plot = harvest_tipcomms, 
+#   base_height = 5,
+#   base_asp = 1.8,filename =  here("figures", "harvest_tipcomms.jpg"))
+# 
+# save_plot(plot = harvest_tipcomms, 
+#   base_height = 4,
+#   base_asp = 1.8,filename =  here("figures", "harvest_tipcomms_big.jpg"))
+
+
+hcom_white = harvest_tipcomms+white_theme+no_axistext+no_grids
+
+cowplot::save_plot(plot = hcom_white,
+  base_height = 3,
+  base_asp = 3,filename =  here("figures", "harvest_tipcomms_white.png"))
+```
+
+
+```{r}
+repot_table_scaled
+
+
+repot_tips_all = read_csv(here("data", "repotting", "ghecto_repotting_root_pulling_data.csv"))%>%   pivot_longer(A:H, names_to = "row", values_to = "morphotype" )  %>% 
+  filter(!is.na(seedling_id)) %>% 
+  mutate(seedling_id = as.numeric(seedling_id)) %>% 
+  filter(!seedling_id %in% repot_table_scaled$seedling_id)  %>% 
+  select(1)%>% 
+  mutate(pustularia_sp = 0, tuber_candidum = 0, rhizopogon_hawkerae = 0, suillus_lakei = 0, peziza_sp= 0, cenococcum_sp = 0) %>% 
+  bind_rows(repot_table_scaled)  %>% 
+  left_join(treat)
+
+
+tip_comms = repot_tips_all %>% 
+  left_join(trt) %>% 
+  pivot_longer(cols = 2:7, names_to = "taxon", values_to = "pct_col")%>% 
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Control soil"
+  ))
+
+
+tipsum = tip_comms %>% 
+  group_by(seedling_sp, soil_type, taxon) %>% 
+  summarize(pct = mean(pct_col)) %>% 
+  mutate(Taxon = case_when(
+    taxon == "cenococcum_sp" ~"Cenococcum sp.",
+    taxon == "peziza_sp" ~"Peziza sp.",
+    taxon == "pustularia_sp" ~"Pustularia sp.",
+    taxon == "rhizopogon_hawkerae" ~"Rhizopogon hawkerae",
+    taxon == "suillus_lakei" ~"Suillus lakei",
+    taxon == "tuber_candidum" ~"Tuber sp."
+  ))%>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  ))%>% 
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Sterile soil"
+  )) %>% 
+  filter(!is.na(seedling_sp))
+
+ggplot(tipsum, aes(x = st_long, y = pct, fill = Taxon))+
+  geom_bar(stat = "identity")+facet_wrap(~sp_long)+theme_minimal()+
+  labs(x = "Soil type", y = "Average percent colonization")+
+  scale_fill_viridis(discrete = TRUE)
+
+
+
+repot_tipcomms = ggplot(tipsum, aes(x = st_long, y = pct, fill = Taxon))+
+  geom_bar(stat = "identity")+facet_wrap(~sp_long)+theme_minimal()+
+  labs(x = "Soil type", y = "Average percent colonization")+
+  scale_fill_viridis(discrete = TRUE)
+
+repot_tipcomms = ggplot(tipsum, aes(x = st_long, y = pct, fill = Taxon))+
+  geom_bar(stat = "identity")+facet_wrap(~sp_long)+theme_minimal()+
+  labs(x = "Initial soil conditioning", y = "Average percent colonization")+
+  scale_fill_manual(values = c("#dd6670",  "#ede2cc", "#93b071",  "#598f91", "#10656d", "#0c3547"))
+
+repot_tipcomms = ggplot(tipsum, aes(x = st_long, y = pct, fill = Taxon))+
+  geom_bar(stat = "identity")+facet_wrap(~sp_long)+theme_minimal()+
+  labs(x = "Initial soil conditioning", y = "Average percent colonization")+
+  scale_fill_viridis_d()
+
+
+viridis_colors <- viridis::viridis(7)
+custom_colors <- c(
+  "Cenococcum sp." = viridis_colors[1],
+  "Melanogaster sp." = viridis_colors[2],
+  "Peziza sp." = viridis_colors[3],
+  "Pustularia sp." = viridis_colors[4],
+  "Rhizopogon hawkerae" = viridis_colors[5],
+  "Suillus lakei" = viridis_colors[6],
+  "Tuber sp." = viridis_colors[7]
+)
+
+repot_tipcomms_vir = ggplot(tipsum, aes(x = st_long, y = pct, fill = Taxon))+
+  geom_bar(stat = "identity")+facet_wrap(~sp_long)+theme_minimal()+
+  labs(x = "Natal soil", y = "Average percent colonization")+
+  scale_fill_manual(values = custom_colors)+theme(panel.border = element_rect(colour = "black", fill=NA, size=1),panel.grid = element_blank())
+
+harvest_table_all = read_csv(here("data/harvest", "harvest_roottips - all.csv")) %>% 
+  filter(!is.na(seedling_id)) %>% 
+  mutate(seedling_id = as.numeric(seedling_id)) %>% 
+  filter(!seedling_id %in% harvest_table_scaled$seedling_id) %>% 
+  select(1) %>% 
+  mutate(pustularia_sp = 0, tuber_sp = 0, rhizopogon_hawkerae = 0, melanogaster_sp = 0, richness = 0) %>% 
+  bind_rows(harvest_table_scaled) 
+
+tip_comms = harvest_table_all%>% 
+  left_join(total_treat) %>% 
+  pivot_longer(cols = 2:5, names_to = "taxon", values_to = "pct_col")%>% 
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Control soil"
+  ))%>% 
+  filter(!is.na(seedling_sp))
+
+tipsum = tip_comms %>% 
+  group_by(seedling_sp, soil_type, taxon) %>% 
+  summarize(pct = mean(pct_col),
+            sd_col = sd(pct_col)) %>% 
+  mutate(Taxon = case_when(
+    taxon == "cenococcum_sp" ~"Cenococcum sp.",
+    taxon == "peziza_sp" ~"Peziza sp.",
+    taxon == "pustularia_sp" ~"Pustularia sp.",
+    taxon == "rhizopogon_hawkerae" ~"Rhizopogon hawkerae",
+    taxon == "melanogaster_sp" ~"Melanogaster sp.",
+    taxon == "tuber_sp" ~"Tuber sp."
+  ))%>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  ))%>% 
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Sterile soil"
+  ))
+
+
+harvest_tipcomms_vir = ggplot(tipsum, aes(x = st_long, y = pct, fill = Taxon))+
+  geom_bar(stat = "identity")+facet_wrap(~sp_long)+theme_minimal()+
+  labs(x = "Natal soil", y = "Average percent colonization")+
+  scale_fill_manual(values = custom_colors)+theme(panel.border = element_rect(colour = "black", fill=NA, size=1),panel.grid = element_blank())
+
+# save_plot(plot = repot_tipcomms,
+#   base_height = 5,
+#   base_asp = 1.8,filename =  here("figures", "repot_tipcomms.jpg"))
+# 
+# save_plot(plot = repot_tipcomms,
+#   base_height = 4,
+#   base_asp = 1.8,filename =  here("figures", "repot_tipcomms_big.jpg"))
+
+
+cowplot::save_plot(plot = repot_tipcomms_vir,
+  base_height = 4,
+  base_asp = 1.8,filename =  here("figures", "repot_tipcomms_vir.png"))
+
+cowplot::save_plot(plot = harvest_tipcomms_vir,
+  base_height = 4,
+  base_asp = 1.8,filename =  here("figures", "harvest_tipcomms_vir.png"))
+```
+
+
+```{r}
+tip_comms_harvest = harvest_table_all%>% 
+  left_join(total_treat) %>% 
+  pivot_longer(cols = 2:5, names_to = "taxon", values_to = "pct_col")%>% 
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Control soil"
+  ))%>% 
+  filter(!is.na(seedling_sp))%>% 
+  mutate(set = "Harvest")
+
+tip_comms_repot = repot_tips_all %>% 
+  left_join(trt) %>% 
+  pivot_longer(cols = 2:7, names_to = "taxon", values_to = "pct_col")%>% 
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Control soil"
+  )) %>% 
+  mutate(set = "Repotting")
+
+tipsum_all = tip_comms_repot %>% 
+  bind_rows(tip_comms_harvest) %>% 
+  mutate(Taxon = case_when(
+    taxon == "cenococcum_sp" ~"Cenococcum sp.",
+    taxon == "peziza_sp" ~"Peziza sp.",
+    taxon == "pustularia_sp" ~"Pustularia sp.",
+    taxon == "rhizopogon_hawkerae" ~"Rhizopogon hawkerae",
+    taxon == "melanogaster_sp" ~"Melanogaster sp.",
+    taxon == "tuber_sp" ~"Tuber sp.",
+    taxon == "melanogaster_sp" ~"Melanogaster sp.",
+    taxon == "suillus_lakei" ~"Suillus lakei",
+    taxon == "tuber_candidum" ~"Tuber sp."
+  ))%>% 
+  group_by(seedling_sp, soil_type, Taxon, set) %>% 
+  summarize(pct = mean(pct_col),
+            sd_col = sd(pct_col)) %>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  ))%>% 
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Sterile soil"
+  )) %>% 
+  ungroup()
+
+tipsum_bigcone = tipsum_all %>% filter(seedling_sp == "P") %>% 
+  filter(pct>0) %>% 
+  mutate(set = factor(set, levels = c("Repotting", "Harvest")))
+
+bigcone_tipcomms = ggplot(tipsum_bigcone, aes(x = st_long, y = pct, fill = Taxon))+
+  geom_bar(stat = "identity")+facet_wrap(~set)+theme_minimal()+
+  labs(x = "Initial soil conditioning", y = "Average percent colonization")+
+  scale_fill_manual(breaks = c("Pustularia sp.", "Rhizopogon hawkerae",  "Suillus lakei"), 
+                    values = c( "#93b071",  "#598f91", "#10656d"))
+bigcone_tipcomms
+
+bcom_white = bigcone_tipcomms+white_theme+no_grids
+
+cowplot::save_plot(plot = bcom_white,
+  base_height = 3,
+  base_asp = 3,filename =  here("figures", "bigcone_tipcomms_white.png"))
+
+tipsum_oak = tipsum_all %>% filter(seedling_sp == "Q") %>% 
+  filter(pct>0) %>% 
+  mutate(set = factor(set, levels = c("Repotting", "Harvest")))
+
+oak_tipcomms = ggplot(tipsum_oak, aes(x = st_long, y = pct, fill = Taxon))+
+  geom_bar(stat = "identity")+facet_wrap(~set)+theme_minimal()+
+  labs(x = "Initial soil conditioning", y = "Average percent colonization")+
+  scale_fill_manual(values = c("#832232","#dd6670",  "#ede2cc", "#93b071",  "#598f91",  "#0c3547"))
+oak_tipcomms
+
+ocom_white = oak_tipcomms+white_theme+no_grids
+
+cowplot::save_plot(plot = ocom_white,
+  base_height = 3,
+  base_asp = 3,filename =  here("figures", "oak_tipcomms_white.png"))
+
+
+
+#values = c("#832232","#dd6670",  "#ede2cc", "#93b071",  "#598f91", "#10656d", "#0c3547"
+```
+
+
+
+drought_treat
+##For looking at drought effects as well
+```{r}
+
+
+h_col = harvest_colonization %>% 
+  mutate(seedling_id = as.numeric(seedling_id)) %>% filter(!is.na(seedling_id)) %>% 
+  left_join(total_treat) %>% left_join(drought_treat) %>% 
+  filter(!is.na(seedling_sp)) %>% 
+  group_by(seedling_sp, treatment, soil_type) %>% 
+  summarise(col = mean(prop_colonized))%>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  ))%>% 
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Sterile soil"
+  ))
+
+hcol_test = harvest_colonization %>% 
+  mutate(seedling_id = as.numeric(seedling_id)) %>% filter(!is.na(seedling_id)) %>% 
+  left_join(total_treat) %>% left_join(drought_treat) %>% 
+  filter(!is.na(seedling_sp))
+
+# mv_pcol = multcompLetters4(aov(prop_colonized~soil_type*treatment, data = hcol_test %>% filter(seedling_sp == "P")), 
+#                          TukeyHSD(aov(prop_colonized~soil_type*treatment, data = hcol_test%>% filter(seedling_sp == "P"))))
+# mv_rp = multcompLetters4(aov(grow_root~soil_type*treatment, data = grow_p), 
+#                          TukeyHSD(aov(grow_root~soil_type*treatment, data = grow_p)))
+
+
+harvest_pctcol = ggplot(h_col, aes(x = st_long, y = col, color = treatment))+
+  geom_point(stat = "identity", size = 7)+facet_grid(~sp_long)+gg_droughtcolor+theme_minimal()+
+  labs(x = "Initial soil conditioning", y = "Average percent colonization")+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+cowplot::save_plot(plot = harvest_pctcol, 
+  base_height = 5,
+  base_asp = 1.8,filename =  here("figures", "harvest_pctcol.jpg"))
+
+cowplot::save_plot(plot = harvest_pctcol, 
+  base_height = 4,
+  base_asp = 1.8,filename =  here("figures", "harvest_pctcol_big.jpg"))
+```
+
+
+##For looking at neighbor soil effects as well
+```{r}
+tipsum = tip_comms %>% 
+  left_join(total_treat) %>% 
+  group_by(seedling_sp, soil_type, taxon, neighb_st) %>% 
+  summarize(pct = mean(pct_col),
+            sd_col = sd(pct_col)) %>% 
+  mutate(Taxon = case_when(
+    taxon == "cenococcum_sp" ~"Cenococcum sp.",
+    taxon == "peziza_sp" ~"Peziza sp.",
+    taxon == "pustularia_sp" ~"Pustularia sp.",
+    taxon == "rhizopogon_hawkerae" ~"Rhizopogon hawkerae",
+    taxon == "melanogaster_sp" ~"Melanogaster sp.",
+    taxon == "tuber_sp" ~"Tuber sp."
+  ))%>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  ))%>% 
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Control soil"
+  ))%>% 
+  mutate(nst_long = case_when(
+    neighb_st == "P" ~ "Neighbor Bigcone soil",
+    neighb_st == "Q" ~ "Neighbor Oak soil",
+    neighb_st == "C" ~ "Neighbor Control soil"
+  ))
+ggplot(tipsum, aes(x = st_long, y = pct, fill = Taxon))+
+  geom_bar(stat = "identity")+facet_grid(nst_long~sp_long)+theme_minimal()+
+  labs(x = "Initial soil conditioning", y = "Average percent colonization")+
+  scale_fill_viridis(discrete = TRUE)
+```
+
+
+```{r}
+check = read_csv(here("data", "repotting", "ghecto_repotting_root_pulling_data.csv")) %>% 
+  mutate(prop_colonized = colonization_numerator/colonization_denominator) %>% 
+  mutate(prop_colonized = case_when(
+    is.na(prop_colonized)~0,
+    .default = prop_colonized)) %>% 
+  left_join(trt) %>% 
+  filter(soil_type == "C") %>% 
+  filter(colonization_numerator>0)
+
+coltest = repot_colonization %>% 
+  left_join(trt) %>% 
+  filter(seedling_sp == "P") %>% 
+  filter(!soil_type == "C")
+
+t.test(prop_colonized~ soil_type, data = coltest)
+
+check1 = read_csv(here("data", "repotting", "ghecto_repotting_root_pulling_data.csv")) %>% 
+  left_join(trt) %>% 
+  group_by(seedling_sp, soil_type) %>% 
+  summarize(n = n())
+```
+
+
+
+
+
+

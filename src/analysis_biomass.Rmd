@@ -1,0 +1,1987 @@
+---
+title: "Comparing biomass"
+author: "Gabe Runte"
+date: "2024-02-14"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(here)
+library(janitor)
+library(RColorBrewer)
+library(multcompView)
+library(patchwork)
+library(tidyverse)
+
+source(here("src", "colors.R"))
+```
+
+## Read in files
+```{r, message = F}
+measure = read_csv(here("data", "analysis/size_master.csv"))
+harvest = read_csv(here("data", "analysis/harvest_metrics.csv")) 
+health = read_csv(here("data", "analysis/ndvi_data.csv"))
+harvest_tips = read_csv(here("data", "analysis/harvest_roottips - all.csv")) %>% 
+  filter(!is.na(seedling_id))
+repot_tips = read_csv(here("data", "repotting/ghecto_repotting_root_pulling_data.csv"))
+harvest_mass = read_csv(here("data", "harvest", "harvest_biomass_wideclean.csv"))
+image_data = read_csv(here("data", "wide_final_seedling_area.csv"))
+repot_mass = read_csv(here("data", "repotting", "repotting_drymass_fitted.csv"))
+neighb_pairs = read_csv(here("data", "design", "ghecto_neighbor_pairs.csv"))
+trt = read_csv(here("data", "design", "seedling_treatments.csv"))
+drought = read_csv(here("data", "design", "drought_assignments_bypot.csv")) %>% select(1,3)
+harvest_comm = read_csv( here("data", "harvest", "harvest_community_matrix_scaled.csv"))
+
+pressure = read_csv(here("data/harvest", "pressure_bomb - Sheet1.csv")) %>% select(1:4) %>%  mutate(time = tolower(time))
+sapwood = read_csv(here("data/harvest", "harvest_sapwood.csv"))
+```
+
+### Edit/compile some files
+```{r, warning = F, message=F}
+colonization = repot_tips %>% 
+  mutate(repot_col = case_when(
+    colonization_numerator == 0 ~ 0,
+    .default = colonization_numerator/colonization_denominator)) %>% 
+  select(seedling_id, repot_col) %>% 
+  left_join(harvest_tips %>% 
+              mutate(harvest_col = case_when(
+                    colonized == 0 ~ 0,
+                    .default =colonized/(colonized+uncolonized))) %>% 
+              select(seedling_id, harvest_col) %>% 
+              mutate(seedling_id = as.numeric(seedling_id)))
+
+drought_treat = health %>% 
+  select(seedling_id, treatment) %>% distinct()
+
+total_treat = measure %>% 
+  select(seedling_id, seedling_sp, soil_type, neighbor, neighb_sp, neighb_st, pot) %>% distinct() %>% drop_na()
+
+sort_string_chars <- function(s) {
+  paste(sort(unlist(strsplit(s, ""))), collapse = "")}
+
+pot_df = neighb_pairs %>% 
+  rename(seedling_id = seedling_1) %>% 
+  left_join(trt) %>% 
+  rename(sp1 = seedling_sp, st1 = soil_type) %>% 
+  select(!seedling_id) %>% 
+  rename(seedling_id = seedling_2) %>% 
+  left_join(trt)%>% 
+  rename(sp2 = seedling_sp, st2 = soil_type) %>% 
+  mutate(spp = paste0(sp1, sp2))%>% 
+  mutate(stt = paste0(st1, st2)) %>% 
+  select(pot, spp, stt) %>% 
+  mutate(spp = map_chr(spp, sort_string_chars)) %>% #alphabetize the combo to minimize different uniques
+  mutate(stt = map_chr(stt, sort_string_chars)) %>% 
+  left_join(drought)
+
+living = measure %>% 
+  filter(date == "2022-04-01") %>% 
+  filter(alive ==1)  %>% 
+  select(seedling_id)
+```
+
+
+## Mass and relative growth
+```{r}
+grow_mass = repot_mass %>% 
+  rename(r_shoot = above_dry, r_root = below_dry) %>% 
+  mutate(r_rs = r_root/r_shoot) %>%
+  mutate(r_total = r_root+r_shoot) %>%
+  left_join(harvest_mass %>% 
+              mutate(shoot = shoot +foliar) %>%  select(-foliar) %>% 
+              rename(h_shoot = shoot, h_root = root) %>% 
+              mutate(h_rs = h_root/h_shoot)) %>%
+              mutate(h_total = h_root+h_shoot)%>% 
+  mutate(grow_root = (h_root-r_root)/r_root)%>% 
+  mutate(grow_shoot = (h_shoot-r_shoot)/r_shoot) %>% 
+  mutate(grow_rs = log(h_rs/r_rs)) %>% 
+  mutate(grow_total = ((h_total-r_total)/r_total)) %>%
+  mutate(soil_type = fct_relevel(soil_type, c("P", "Q", "C"))) %>% 
+  left_join(drought_treat) %>% 
+  left_join(total_treat) %>% 
+  left_join(repot_mass %>% 
+              mutate(n_total = above_dry+below_dry) %>% 
+              select(seedling_id, n_total) %>%  rename(neighbor = seedling_id)) %>% 
+  mutate(n_rel = r_total^2/n_total) %>% 
+  filter(seedling_id %in% living$seedling_id)
+
+
+rel_size = grow_mass %>% 
+  select(seedling_id, r_total) %>% 
+  left_join(total_treat) %>% 
+  group_by(seedling_sp, soil_type) %>% 
+  mutate(avg_mass = (r_total-mean(r_total, na.rm = T))/sd(r_total, na.rm = T)) %>% 
+  ungroup() %>% 
+  select(seedling_id, avg_mass) %>% 
+  rename(rel_mass = avg_mass)
+
+rel_final = grow_mass %>% 
+  select(seedling_id, h_total) %>% 
+  left_join(total_treat) %>% 
+  group_by(seedling_sp, soil_type, neighb_sp, neighb_st) %>% 
+  mutate(avg_mass = (h_total-mean(h_total, na.rm = T))/sd(h_total, na.rm = T)) %>% 
+  ungroup() %>% 
+  select(seedling_id, avg_mass) %>% 
+  rename(rel_hmass = avg_mass)
+
+n_relsize = rel_size %>% 
+  rename(neighbor = seedling_id, n_relmass = rel_mass)
+```
+
+```{r}
+rel_set = rel_size %>% 
+  left_join(rel_final) %>% 
+  left_join(total_treat) %>% 
+  left_join(n_relsize) %>% 
+  left_join(drought_treat) %>% 
+  left_join(grow_mass) %>% 
+  mutate(rel = rel_mass-n_relmass) 
+
+ndvi = health %>% 
+  group_by(seedling_id) %>% 
+  summarize(ndvi = mean(mean_ndvi)) %>% 
+  left_join(total_treat)%>% 
+  mutate(home_rank = case_when(
+    soil_type == seedling_sp & neighb_sp == soil_type & soil_type==neighb_st ~ "Both",
+    soil_type == seedling_sp ~ "Self",
+    seedling_sp == neighb_st ~ "Neighbor",
+    .default = "None"
+  )) %>% 
+  mutate(home_rank = factor(home_rank, levels = c("None", "Neighbor", "Self", "Both"))) %>% 
+  filter(!is.na(seedling_sp)) %>% 
+  filter(seedling_id %in% living$seedling_id)
+
+rel_set2 = rel_set %>% 
+  group_by(seedling_sp, soil_type, treatment, neighb_sp, neighb_st) %>% 
+  mutate(reltot_scaled = (grow_total-mean(grow_total, na.rm=T))/sd(grow_total, na.rm=T)) %>% 
+  left_join(ndvi)
+
+
+ggplot(rel_set, aes(x = n_relmass, y = rel_hmass, col = seedling_sp))+
+  geom_point()
+
+ggplot(rel_set, aes(x = rel_mass, y = rel_hmass, col = soil_type))+
+  geom_point()+facet_grid(seedling_sp~treatment)+geom_smooth(method = "lm")
+
+ggplot(rel_set %>% filter(seedling_sp=="P"), aes(x = rel_mass-n_relmass, y = grow_total, col = neighb_sp))+
+  geom_point()+facet_grid(seedling_sp~treatment, scales = "free")+geom_smooth(method = "lm")
+
+ggplot(rel_set %>% filter(seedling_sp=="P"), aes(x = n_relmass, y = grow_root, col = neighb_sp))+
+  geom_point()+facet_grid(seedling_sp~treatment, scales = "free")+geom_smooth(method = "lm")
+
+ggplot(rel_set2 , aes(x = n_relmass, y = reltot_scaled, col = neighb_sp))+
+  geom_point()+facet_grid(seedling_sp~treatment, scales = "free")+geom_smooth(method = "lm")+
+  gg_nspcolor+theme_minimal()+labs(x= "Neighbor relative size", y = "Relative growth")
+
+lmrel = lm(rel_hmass~rel_mass*treatment, data = rel_set %>% filter(seedling_sp=="P"))
+steprel = MASS::stepAIC(lmrel)
+summary(eval(steprel$call))
+
+ggplot(rel_set2 %>% filter(r_rs<6), aes(x = r_rs, y = reltot_scaled, col = neighb_sp))+
+  geom_point()+facet_grid(seedling_sp~treatment, scales = "free")+geom_smooth(method = "lm")
+
+
+lmx = lm(grow_total~neighb_sp*neighb_st*soil_type*treatment*rel, data = rel_set2 %>% filter(seedling_sp=="P"))
+stepz = MASS::stepAIC(lmx)
+summary(eval(stepz$call))
+
+
+ggplot(rel_set2, aes(x = grow_total, y= ndvi, col = soil_type))+
+  geom_point()+facet_grid(treatment~seedling_sp, scales = "free")+
+  geom_smooth(method="lm")
+
+
+ggplot(rel_set2, aes(x = grow_shoot, y= ndvi, col = soil_type))+
+  geom_point()+facet_grid(treatment~seedling_sp, scales = "free")+
+  geom_smooth(method="lm")
+
+ndp = rel_set2 %>% 
+  filter(seedling_sp=="P") %>% 
+  select(ndvi, soil_type, treatment, neighb_sp, neighb_st) %>% 
+  drop_na()
+# mv_nd = multcompLetters4(aov(ndvi~soil_type*treatment*neighb_sp*neighb_st,data = ndp), 
+#                          TukeyHSD(aov(ndvi~soil_type*treatment*neighb_sp*neighb_st,data = ndp)))
+
+# mv_tp_tib = tibble(st_trt = rownames(as.data.frame.list(mv_tp$`soil_type:treatment`)),
+#                    tp = mv_tp$`soil_type:treatment`$Letters)
+```
+
+
+```{r, eval = F}
+ggplot(rel_set2, aes(x = soil_type, y= ndvi, col = treatment, fill = soil_type))+
+  geom_boxplot(outlier.shape=NA, alpha = 0.8)+facet_grid(~seedling_sp, scales = "free")
+
+ggplot(rel_set2, aes(x = neighb_sp, y= ndvi, fill = treatment))+
+  geom_point(position=position_jitterdodge(jitter.width = 0.15), aes(col = treatment))+
+  geom_boxplot(outlier.shape=NA, alpha = 0.8)+facet_grid(~sp_long, scales = "free")+
+  gg_droughtfill+theme_minimal()+gg_droughtcolor
+
+ggplot(rel_set2, aes(x = soil_type, y= ndvi, fill = treatment))+
+  geom_point(position=position_jitterdodge(jitter.width = 0.15), aes(col = treatment), alpha = 0.5)+
+  geom_boxplot(outlier.shape=NA, alpha = 0.85)+facet_grid(~sp_long, scales = "free")+
+  gg_droughtfill+theme_minimal()+gg_droughtcolor+
+  labs(y = "NDVI", x="Soil type")
+
+ggplot(rel_set2, aes(x = treatment, y= ndvi, fill = soil_type))+
+  geom_point(position=position_jitterdodge(jitter.width = 0.15), aes(col = soil_type), alpha = 0.5)+
+  geom_boxplot(outlier.shape=NA, alpha = 0.85)+facet_grid(~sp_long, scales = "free")+
+  gg_soilcolor+theme_minimal()+gg_soilfill+
+  labs(y = "NDVI", x="Treatment")
+
+ggplot(rel_set2%>% filter(seedling_sp=="P"), aes(x = treatment, y= h_total, fill = soil_type))+
+  geom_point(position=position_jitterdodge(jitter.width = 0.15), aes(col = soil_type), alpha = 0.5)+
+  geom_boxplot(outlier.shape=NA, alpha = 0.85)+facet_grid(~sp_long, scales = "free")+
+  gg_soilcolor+theme_minimal()+gg_soilfill+
+  labs(y = "Total growth", x="Treatment")
+
+ggplot(rel_set2 %>% filter(seedling_sp=="Q"), aes(x = treatment, y= h_total, fill = soil_type))+
+  geom_point(position=position_jitterdodge(jitter.width = 0.15), aes(col = soil_type), alpha = 0.5)+
+  geom_boxplot(outlier.shape=NA, alpha = 0.85)+facet_grid(~sp_long, scales = "free")+
+  gg_soilcolor+theme_minimal()+gg_soilfill+
+  labs(y = "Total growth", x="Treatment")
+```
+
+```{r}
+grow_mass
+TukeyHSD(aov(h_total~soil_type, data = grow_mass %>% 
+               filter(seedling_sp=="P") %>% 
+               filter(treatment == "C")))
+
+summary(lm(grow_total~soil_type*neighb_sp*neighb_st*n_rel, data = grow_mass %>% 
+               filter(seedling_sp=="P") ))
+summary(lm(grow_root~soil_type*neighb_sp*neighb_st*n_rel, data = grow_mass %>% 
+               filter(seedling_sp=="P") ))
+summary(lm(grow_shoot~soil_type*neighb_sp*neighb_st*n_rel, data = grow_mass %>% 
+               filter(seedling_sp=="P") ))
+
+summary(lm(grow_total~soil_type*neighb_sp*n_rel, data = grow_mass %>% 
+               filter(seedling_sp=="Q") ))
+summary(lm(grow_root~soil_type*neighb_sp*n_rel, data = grow_mass %>% 
+               filter(seedling_sp=="Q") ))
+summary(lm(grow_shoot~soil_type*neighb_sp*n_rel, data = grow_mass %>% 
+               filter(seedling_sp=="Q") ))
+```
+
+
+```{r}
+MASS::stepAIC(lm(grow_total~soil_type*neighb_sp*neighb_st*n_rel, data = grow_mass %>% 
+               filter(seedling_sp=="P") ))
+
+summary(lm(formula = grow_total ~ soil_type + neighb_sp + neighb_st + 
+    n_rel + soil_type:n_rel, data = grow_mass %>% filter(seedling_sp == 
+    "P")))
+
+MASS::stepAIC(lm(grow_root~soil_type*neighb_sp*neighb_st*n_rel, data = grow_mass %>% 
+               filter(seedling_sp=="P") ))
+
+summary(lm(formula = grow_root ~ soil_type + neighb_sp + n_rel, data = grow_mass %>% 
+    filter(seedling_sp == "P")))
+
+MASS::stepAIC(lm(grow_shoot~soil_type*neighb_sp*neighb_st*n_rel, data = grow_mass %>% 
+               filter(seedling_sp=="P") %>% drop_na()))
+
+summary(lm(formula = grow_shoot ~ soil_type + neighb_sp + neighb_st + 
+    n_rel + neighb_sp:neighb_st + neighb_st:n_rel, data = grow_mass %>% 
+    filter(seedling_sp == "P") %>% drop_na()))
+```
+
+```{r}
+MASS::stepAIC(lm(grow_total~soil_type*neighb_sp*neighb_st*n_rel*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="P") ))
+
+summary(lm(formula = grow_total ~ soil_type + neighb_sp + neighb_st + 
+    n_rel + soil_type:n_rel, data = grow_mass %>% filter(seedling_sp == 
+    "P")))
+
+MASS::stepAIC(lm(grow_root~soil_type*neighb_sp*neighb_st*n_rel*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="P") ))
+
+summary(lm(formula = grow_root ~ soil_type + neighb_sp + neighb_st + 
+    n_rel + treatment + soil_type:neighb_sp + soil_type:neighb_st + 
+    neighb_sp:neighb_st + soil_type:n_rel + neighb_sp:n_rel + 
+    neighb_st:n_rel + soil_type:treatment + neighb_sp:treatment + 
+    neighb_st:treatment + n_rel:treatment + soil_type:neighb_sp:neighb_st + 
+    soil_type:neighb_sp:n_rel + soil_type:neighb_st:n_rel + neighb_sp:neighb_st:n_rel + 
+    soil_type:neighb_sp:treatment + soil_type:neighb_st:treatment + 
+    soil_type:n_rel:treatment + neighb_sp:n_rel:treatment + neighb_st:n_rel:treatment + 
+    soil_type:neighb_sp:n_rel:treatment + soil_type:neighb_st:n_rel:treatment, 
+    data = grow_mass %>% filter(seedling_sp == "P")))
+
+MASS::stepAIC(lm(grow_shoot~soil_type*neighb_sp*neighb_st*n_rel*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="P") %>% drop_na()))
+
+summary(lm(formula = grow_shoot ~ soil_type + neighb_sp + neighb_st + 
+    n_rel + treatment + neighb_sp:neighb_st + soil_type:n_rel + 
+    neighb_sp:n_rel + neighb_st:n_rel + soil_type:treatment + 
+    neighb_sp:treatment + neighb_st:treatment + n_rel:treatment + 
+    neighb_sp:neighb_st:n_rel + neighb_sp:neighb_st:treatment + 
+    neighb_sp:n_rel:treatment + neighb_st:n_rel:treatment + neighb_sp:neighb_st:n_rel:treatment, 
+    data = grow_mass %>% filter(seedling_sp == "P") %>% drop_na()))
+```
+
+```{r}
+MASS::stepAIC(lm(grow_total~soil_type*neighb_sp*neighb_st*n_rel*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="Q") ))
+
+summary(lm(formula = grow_total ~ soil_type + neighb_sp + neighb_st + 
+    n_rel + treatment + soil_type:neighb_sp + soil_type:neighb_st + 
+    neighb_sp:neighb_st + soil_type:n_rel + neighb_sp:n_rel + 
+    neighb_st:n_rel + soil_type:treatment + neighb_st:treatment + 
+    n_rel:treatment + soil_type:neighb_st:n_rel + neighb_sp:neighb_st:n_rel + 
+    soil_type:neighb_st:treatment + soil_type:n_rel:treatment + 
+    neighb_st:n_rel:treatment + soil_type:neighb_st:n_rel:treatment, 
+    data = grow_mass %>% filter(seedling_sp == "Q")))
+
+MASS::stepAIC(lm(grow_root~soil_type*neighb_sp*neighb_st*n_rel*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="Q") ))
+
+summary(lm(formula = grow_root ~ soil_type + neighb_sp + neighb_st + 
+    n_rel + treatment + soil_type:neighb_sp + soil_type:neighb_st + 
+    neighb_sp:neighb_st + neighb_sp:n_rel + neighb_st:n_rel + 
+    soil_type:treatment + neighb_sp:treatment + neighb_st:treatment + 
+    neighb_sp:neighb_st:n_rel + soil_type:neighb_sp:treatment + 
+    soil_type:neighb_st:treatment + neighb_sp:neighb_st:treatment, 
+    data = grow_mass %>% filter(seedling_sp == "Q")))
+
+MASS::stepAIC(lm(grow_shoot~soil_type*neighb_sp*neighb_st*n_rel*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="Q")))
+
+summary(lm(formula = grow_shoot ~ soil_type + neighb_sp + neighb_st + 
+    n_rel + treatment + soil_type:neighb_sp + soil_type:neighb_st + 
+    neighb_sp:neighb_st + soil_type:n_rel + neighb_sp:n_rel + 
+    neighb_st:n_rel + neighb_sp:treatment + neighb_st:treatment + 
+    n_rel:treatment + soil_type:neighb_sp:neighb_st + soil_type:neighb_sp:n_rel + 
+    soil_type:neighb_st:n_rel + neighb_sp:neighb_st:n_rel + neighb_sp:neighb_st:treatment + 
+    neighb_sp:n_rel:treatment + neighb_st:n_rel:treatment + soil_type:neighb_sp:neighb_st:n_rel, 
+    data = grow_mass %>% filter(seedling_sp == "Q")))
+```
+
+Harvest prediction
+```{r}
+h_p_tot = MASS::stepAIC(lm(h_total~soil_type*neighb_sp*neighb_st*n_rel*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="P") ))
+h_p_tot_summ = summary(eval(h_p_tot$call))
+h_p_tot_tidy = broom::tidy(eval(h_p_tot$call)) %>% 
+  clean_names() %>% 
+  filter(p_value<0.05) %>% 
+  mutate(estimate = round(estimate, 3), std_error = round(std_error, 3), 
+         statistic = round(statistic, 3), p_value = round(p_value, 4))
+```
+
+```{r}
+h_p_root = MASS::stepAIC(lm(h_root~soil_type*neighb_sp*neighb_st*n_rel*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="P") ))
+h_p_root_summ = summary(eval(h_p_root$call))
+h_p_root_tidy = broom::tidy(eval(h_p_root$call)) %>% 
+  clean_names() %>% 
+  filter(p_value<0.05) %>% 
+  mutate(estimate = round(estimate, 3), std_error = round(std_error, 3), 
+         statistic = round(statistic, 3), p_value = round(p_value, 4))
+```
+
+```{r}
+h_p_shoot = MASS::stepAIC(lm(h_shoot~soil_type*neighb_sp*neighb_st*n_rel*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="P") ))
+h_p_shoot_summ = summary(eval(h_p_shoot$call))
+h_p_shoot_tidy = broom::tidy(eval(h_p_shoot$call)) %>% 
+  clean_names() %>% 
+  filter(p_value<0.05) %>% 
+  mutate(estimate = round(estimate, 3), std_error = round(std_error, 3), 
+         statistic = round(statistic, 3), p_value = round(p_value, 4))
+```
+
+
+```{r}
+h_q_tot = MASS::stepAIC(lm(h_total~soil_type*neighb_sp*neighb_st*n_rel*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="Q") ))
+h_q_tot_summ = summary(eval(h_q_tot$call))
+h_q_tot_tidy = broom::tidy(eval(h_q_tot$call)) %>% 
+  clean_names() %>% 
+  filter(p_value<0.05) %>% 
+  mutate(estimate = round(estimate, 3), std_error = round(std_error, 3), 
+         statistic = round(statistic, 3), p_value = round(p_value, 4))
+```
+
+```{r}
+h_q_root = MASS::stepAIC(lm(h_root~soil_type*neighb_sp*neighb_st*n_rel*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="Q") ))
+h_q_root_summ = summary(eval(h_q_root$call))
+h_q_root_tidy = broom::tidy(eval(h_q_root$call)) %>% 
+  clean_names() %>% 
+  filter(p_value<0.05) %>% 
+  mutate(estimate = round(estimate, 3), std_error = round(std_error, 3), 
+         statistic = round(statistic, 3), p_value = round(p_value, 4))
+```
+
+```{r}
+h_q_shoot = MASS::stepAIC(lm(h_shoot~soil_type*neighb_sp*neighb_st*n_rel*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="Q") ))
+h_q_shoot_summ = summary(eval(h_q_shoot$call))
+h_q_shoot_tidy = broom::tidy(eval(h_q_shoot$call)) %>% 
+  clean_names() %>% 
+  filter(p_value<0.05) %>% 
+  mutate(estimate = round(estimate, 3), std_error = round(std_error, 3), 
+         statistic = round(statistic, 3), p_value = round(p_value, 4))
+```
+
+```{r}
+summary(lm(formula = h_total ~ soil_type + neighb_sp + neighb_st + n_rel + 
+    treatment + neighb_sp:n_rel + neighb_st:n_rel, data = grow_mass %>% 
+    filter(seedling_sp == "P")))
+
+MASS::stepAIC(lm(h_root~soil_type*neighb_sp*neighb_st*n_rel*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="P") ))
+
+summary(lm(formula = h_root ~ soil_type + neighb_sp + neighb_st + n_rel + 
+    neighb_sp:n_rel + neighb_st:n_rel, data = grow_mass %>% filter(seedling_sp == 
+    "P")))
+
+MASS::stepAIC(lm(h_shoot~soil_type*neighb_sp*neighb_st*n_rel*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="P") %>% drop_na()))
+
+summary(lm(formula = h_shoot ~ soil_type + neighb_sp + neighb_st + n_rel + 
+    treatment + neighb_sp:neighb_st + neighb_sp:n_rel + neighb_st:n_rel + 
+    neighb_sp:treatment + neighb_st:treatment + n_rel:treatment + 
+    neighb_sp:neighb_st:n_rel + neighb_sp:neighb_st:treatment + 
+    neighb_sp:n_rel:treatment + neighb_st:n_rel:treatment + neighb_sp:neighb_st:n_rel:treatment, 
+    data = grow_mass %>% filter(seedling_sp == "P") %>% drop_na()))
+
+MASS::stepAIC(lm(h_rs~soil_type*neighb_sp*neighb_st*n_rel*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="P") %>% drop_na()))
+
+summary(lm(formula = h_rs ~ soil_type + neighb_st + n_rel + treatment + 
+    soil_type:neighb_st + soil_type:n_rel + neighb_st:n_rel + 
+    soil_type:treatment + neighb_st:treatment + n_rel:treatment + 
+    soil_type:neighb_st:n_rel + soil_type:neighb_st:treatment + 
+    soil_type:n_rel:treatment + neighb_st:n_rel:treatment + soil_type:neighb_st:n_rel:treatment, 
+    data = grow_mass %>% filter(seedling_sp == "P") %>% drop_na()))
+```
+
+```{r}
+MASS::stepAIC(lm(h_total~soil_type*neighb_sp*neighb_st*n_rel*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="Q") ))
+
+summary(lm(formula = h_total ~ soil_type + neighb_sp + neighb_st + n_rel + 
+    treatment + soil_type:neighb_sp + soil_type:neighb_st + neighb_sp:neighb_st + 
+    soil_type:n_rel + neighb_sp:n_rel + neighb_st:n_rel + soil_type:treatment + 
+    neighb_st:treatment + n_rel:treatment + soil_type:neighb_st:n_rel + 
+    neighb_sp:neighb_st:n_rel + soil_type:neighb_st:treatment + 
+    soil_type:n_rel:treatment + neighb_st:n_rel:treatment + soil_type:neighb_st:n_rel:treatment, 
+    data = grow_mass %>% filter(seedling_sp == "Q")))
+
+MASS::stepAIC(lm(h_root~soil_type*neighb_sp*neighb_st*n_rel*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="Q") ))
+
+summary(lm(formula = h_root ~ soil_type + neighb_sp + neighb_st + n_rel + 
+    treatment + soil_type:neighb_sp + soil_type:neighb_st + neighb_sp:neighb_st + 
+    soil_type:n_rel + neighb_sp:n_rel + neighb_st:n_rel + soil_type:treatment + 
+    neighb_st:treatment + n_rel:treatment + soil_type:neighb_st:n_rel + 
+    neighb_sp:neighb_st:n_rel + soil_type:neighb_st:treatment + 
+    soil_type:n_rel:treatment + neighb_st:n_rel:treatment + soil_type:neighb_st:n_rel:treatment, 
+    data = grow_mass %>% filter(seedling_sp == "Q")))
+
+MASS::stepAIC(lm(h_shoot~soil_type*neighb_sp*neighb_st*n_rel*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="Q")))
+
+summary(lm(formula = h_shoot ~ soil_type + neighb_sp + neighb_st + n_rel + 
+    treatment + soil_type:neighb_sp + soil_type:neighb_st + neighb_sp:neighb_st + 
+    soil_type:n_rel + neighb_sp:n_rel + neighb_st:n_rel + soil_type:treatment + 
+    neighb_sp:treatment + neighb_st:treatment + n_rel:treatment + 
+    soil_type:neighb_sp:neighb_st + soil_type:neighb_st:n_rel + 
+    neighb_sp:neighb_st:n_rel + neighb_sp:neighb_st:treatment + 
+    soil_type:n_rel:treatment + neighb_sp:n_rel:treatment + neighb_st:n_rel:treatment + 
+    neighb_sp:neighb_st:n_rel:treatment, data = grow_mass %>% 
+    filter(seedling_sp == "Q")))
+```
+
+
+```{r}
+TukeyHSD(aov(h_root~soil_type*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="P") ))
+
+TukeyHSD(aov(h_shoot~soil_type*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="P") ))
+
+TukeyHSD(aov(h_total~soil_type*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="P") ))
+
+TukeyHSD(aov(h_root~soil_type, data = grow_mass %>% 
+               filter(seedling_sp=="P") %>% 
+               filter(treatment == "D")))
+```
+
+```{r}
+grow_mass
+TukeyHSD(aov(h_total~soil_type, data = grow_mass %>% 
+               filter(seedling_sp=="P") %>% 
+               filter(treatment == "C")))
+
+TukeyHSD(aov(h_root~soil_type, data = grow_mass %>% 
+               filter(seedling_sp=="P") ))
+
+TukeyHSD(aov(h_shoot~soil_type*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="P") ))
+
+TukeyHSD(aov(h_total~soil_type*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="P") ))
+
+TukeyHSD(aov(h_root~soil_type, data = grow_mass %>% 
+               filter(seedling_sp=="P") %>% 
+               filter(treatment == "D")))
+```
+
+```{r}
+grow_p = grow_mass %>% filter(seedling_sp=="P") %>% 
+  mutate(st_trt = paste(soil_type, treatment, sep = ":"))
+grow_q = grow_mass %>% filter(seedling_sp=="Q")%>% 
+  mutate(st_trt = paste(soil_type, treatment, sep = ":"))
+
+
+mv_tp = multcompLetters4(aov(grow_total~soil_type*treatment, data = grow_p), 
+                         TukeyHSD(aov(grow_total~soil_type*treatment, data = grow_p)))
+mv_rp = multcompLetters4(aov(grow_root~soil_type*treatment, data = grow_p), 
+                         TukeyHSD(aov(grow_root~soil_type*treatment, data = grow_p)))
+mv_sp = multcompLetters4(aov(grow_shoot~soil_type*treatment, data = grow_p), 
+                         TukeyHSD(aov(grow_shoot~soil_type*treatment, data = grow_p)))
+
+mv_tp_tib = tibble(st_trt = rownames(as.data.frame.list(mv_tp$`soil_type:treatment`)),
+                   tp = mv_tp$`soil_type:treatment`$Letters)
+mv_rp_tib = tibble(st_trt = rownames(as.data.frame.list(mv_rp$`soil_type:treatment`)),
+                   rp = mv_rp$`soil_type:treatment`$Letters)
+mv_sp_tib = tibble(st_trt = rownames(as.data.frame.list(mv_sp$`soil_type:treatment`)),
+                   sp = mv_sp$`soil_type:treatment`$Letters)
+
+grow_p_let = grow_p %>% 
+  left_join(mv_tp_tib)%>% 
+  left_join(mv_rp_tib)%>% 
+  left_join(mv_sp_tib) %>%
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil", 
+    soil_type == "C" ~ "Sterile soil"
+  )) %>% 
+  group_by(st_trt) %>% 
+  mutate(tp_y = quantile((grow_total), probs = .95, na.rm=T)+IQR((grow_total), na.rm=T))%>% 
+  mutate(rp_y = quantile((grow_root), probs = 0.95, na.rm=T)+IQR((grow_root), na.rm=T))%>% 
+  mutate(sp_y = quantile((grow_shoot), probs = 0.95, na.rm=T)+IQR((grow_shoot), na.rm=T))
+
+grow_pt_legend=ggplot(grow_p_let, aes(x = st_long, y = grow_total, fill = soil_type, group = st_trt, col = treatment))+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+gg_droughtcolor+theme_minimal()+ 
+  labs(x = "Soil type", y = "Total Growth (g/g)")+ 
+    geom_text(aes(x = st_long, y = tp_y, label = tp), size = 3, position = position_dodge(width = 0.75))+no_grids+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+leg= cowplot::get_legend(grow_pt_legend)
+grow_pt= grow_pt_legend+ theme(legend.position = 'none')
+
+grow_pr=ggplot(grow_p_let, aes(x = st_long, y = grow_root, fill = soil_type, group = st_trt, col = treatment))+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+gg_droughtcolor+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root Growth (g/g)")+ theme(legend.position = 'none')+
+    geom_text(aes(x = st_long, y = rp_y, label = rp), size = 3, position = position_dodge(width = 0.75))+no_grids+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+grow_ps=ggplot(grow_p_let, aes(x = st_long, y = grow_shoot, fill = soil_type, group = st_trt, col = treatment))+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+gg_droughtcolor+theme_minimal()+ 
+  labs(x = "Soil type", y = "Shoot Growth (g/g)")+ theme(legend.position = 'none')+
+    geom_text(aes(x = st_long, y = sp_y, label = sp), size = 3, position = position_dodge(width = 0.75))+no_grids+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+
+#####
+
+grow_q = grow_mass %>% filter(seedling_sp=="Q")%>% 
+  mutate(st_trt = paste(soil_type, treatment, sep = ":"))
+
+
+mv_tq = multcompLetters4(aov(grow_total~soil_type*treatment, data = grow_q), 
+                         TukeyHSD(aov(grow_total~soil_type*treatment, data = grow_q)))
+mv_rq = multcompLetters4(aov(grow_root~soil_type*treatment, data = grow_q), 
+                         TukeyHSD(aov(grow_root~soil_type*treatment, data = grow_q)))
+mv_sq = multcompLetters4(aov(grow_shoot~soil_type*treatment, data = grow_q), 
+                         TukeyHSD(aov(grow_shoot~soil_type*treatment, data = grow_q)))
+
+mv_tq_tib = tibble(st_trt = rownames(as.data.frame.list(mv_tq$`soil_type:treatment`)),
+                   tp = mv_tq$`soil_type:treatment`$Letters)
+mv_rq_tib = tibble(st_trt = rownames(as.data.frame.list(mv_rq$`soil_type:treatment`)),
+                   rp = mv_rq$`soil_type:treatment`$Letters)
+mv_sq_tib = tibble(st_trt = rownames(as.data.frame.list(mv_sq$`soil_type:treatment`)),
+                   sp = mv_sq$`soil_type:treatment`$Letters)
+
+grow_q_let = grow_q %>% 
+  left_join(mv_tq_tib)%>% 
+  left_join(mv_rq_tib)%>% 
+  left_join(mv_sq_tib) %>%
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil", 
+    soil_type == "C" ~ "Sterile soil"
+  )) %>% 
+  group_by(st_trt) %>% 
+  mutate(tq_y = quantile((grow_total), probs = .95, na.rm=T)+IQR((grow_total), na.rm=T))%>% 
+  mutate(rq_y = quantile((grow_root), probs = 0.95, na.rm=T)+IQR((grow_root), na.rm=T))%>% 
+  mutate(sq_y = quantile((grow_shoot), probs = 0.95, na.rm=T)+IQR((grow_shoot), na.rm=T))
+
+grow_qt=ggplot(grow_q_let, aes(x = st_long, y = grow_total, fill = soil_type, group = st_trt, col = treatment))+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+gg_droughtcolor+theme_minimal()+ 
+  labs(x = "Soil type", y = "Total Growth (g/g)")+ theme(legend.position = 'none')+ 
+    geom_text(aes(x = st_long, y = tq_y, label = tp), size = 3, position = position_dodge(width = 0.75))+no_grids+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+grow_qr=ggplot(grow_q_let, aes(x = st_long, y = grow_root, fill = soil_type, group = st_trt, col = treatment))+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+gg_droughtcolor+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root Growth (g/g)")+ theme(legend.position = 'none')+
+    geom_text(aes(x = st_long, y = rq_y, label = rp), size = 3, position = position_dodge(width = 0.75))+no_grids+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+grow_qs=ggplot(grow_q_let, aes(x = st_long, y = grow_shoot, fill = soil_type, group = st_trt, col = treatment))+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+gg_droughtcolor+theme_minimal()+ 
+  labs(x = "Soil type", y = "Shoot Growth (g/g)")+ theme(legend.position = 'none')+
+    geom_text(aes(x = st_long, y = sq_y, label = sp), size = 3, position = position_dodge(width = 0.75))+no_grids+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+
+grow_legend_plot =ggplot(grow_q_let, aes(x = st_long, y = grow_shoot, fill = soil_type, group = st_trt, col = treatment))+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+gg_droughtcolor+theme_minimal()+ 
+  labs(x = "Soil type", y = "Shoot Growth (g/g)")+
+    geom_text(aes(x = st_long, y = sq_y, label = sp), size = 3, position = position_dodge(width = 0.75))
+
+grow_legend = cowplot::get_legend(grow_legend_plot)
+```
+
+```{r}
+growthall = (grow_pr+grow_ps+grow_pt)/(grow_qr+grow_qs+grow_qt)
+ggsave(plot = growthall, width = 7.5, height = 5, here("figures", "growth_trt.png"))
+
+```
+
+```{r}
+library(cowplot)
+p_title <- ggdraw() + 
+  draw_label(
+    "Bigcones",
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    # add margin on the left of the drawing canvas,
+    # so title is aligned with left edge of first plot
+    plot.margin = margin(0, 0, 0, 7)
+  )
+
+q_title <- ggdraw() + 
+  draw_label(
+    "Oaks",
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    # add margin on the left of the drawing canvas,
+    # so title is aligned with left edge of first plot
+    plot.margin = margin(0, 0, 0, 7)
+  )
+
+plot_row1 <- plot_grid(grow_pr,grow_ps,grow_pt, nrow = 1)
+plot_row2 <- plot_grid(grow_qr,grow_qs,grow_qt, nrow = 1)
+
+bigplot = plot_grid(
+  p_title, plot_row1,q_title,plot_row2,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.2, 1,0.2,1)
+)
+
+grow_withlegend = plot_grid(bigplot, grow_legend, rel_widths = c(1, 0.2), nrow = 1) 
+
+save_plot(plot = grow_withlegend, 
+  base_height = 5,
+  base_asp = 1.8,filename =  here("figures", "growthplot_withlegend.jpg"))
+```
+
+
+```{r}
+grow_p = grow_mass %>% filter(seedling_sp=="P") %>% 
+  filter(treatment=="C")
+
+
+
+mv_tp = multcompLetters4(aov(grow_total~soil_type, data = grow_p), 
+                         TukeyHSD(aov(grow_total~soil_type, data = grow_p)))
+mv_rp = multcompLetters4(aov(grow_root~soil_type, data = grow_p), 
+                         TukeyHSD(aov(grow_root~soil_type, data = grow_p)))
+mv_sp = multcompLetters4(aov(grow_shoot~soil_type, data = grow_p), 
+                         TukeyHSD(aov(grow_shoot~soil_type, data = grow_p)))
+
+mv_tp_tib = tibble(soil_type = rownames(as.data.frame.list(mv_tp$`soil_type`)),
+                   tp = mv_tp$`soil_type`$Letters)
+mv_rp_tib = tibble(soil_type = rownames(as.data.frame.list(mv_rp$`soil_type`)),
+                   rp = mv_rp$`soil_type`$Letters)
+mv_sp_tib = tibble(soil_type = rownames(as.data.frame.list(mv_sp$`soil_type`)),
+                   sp = mv_sp$`soil_type`$Letters)
+
+grow_p_let = grow_p %>% 
+  left_join(mv_tp_tib)%>% 
+  left_join(mv_rp_tib)%>% 
+  left_join(mv_sp_tib) %>%
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil", 
+    soil_type == "C" ~ "Control soil"
+  )) %>% 
+  group_by(soil_type) %>% 
+  mutate(tp_y = quantile((grow_total), probs = .95, na.rm=T)+IQR((grow_total), na.rm=T))%>% 
+  mutate(rp_y = quantile((grow_root), probs = 0.95, na.rm=T)+IQR((grow_root), na.rm=T))%>% 
+  mutate(sp_y = quantile((grow_shoot), probs = 0.95, na.rm=T)+IQR((grow_shoot), na.rm=T))
+
+grow_pt_legend=ggplot(grow_p_let, aes(x = st_long, y = grow_total, fill = soil_type))+
+  geom_point(position=position_jitterdodge(), aes(col = soil_type), alpha=0.8)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Total Growth (g/g)")+ 
+    geom_text(aes(x = st_long, y = tp_y, label = tp), size = 3, position = position_dodge(width = 0.75))+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+leg= cowplot::get_legend(grow_pt_legend)
+grow_pt= grow_pt_legend+ theme(legend.position = 'none')
+
+grow_pr=ggplot(grow_p_let, aes(x = st_long, y = grow_root, fill = soil_type))+
+  geom_point(position=position_jitterdodge(), aes(col = soil_type), alpha=0.8)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root Growth (g/g)")+ theme(legend.position = 'none')+
+    geom_text(aes(x = st_long, y = rp_y, label = rp), size = 3, position = position_dodge(width = 0.75))+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+grow_ps=ggplot(grow_p_let, aes(x = st_long, y = grow_shoot, fill = soil_type))+
+  geom_point(position=position_jitterdodge(), aes(col = soil_type), alpha=0.8)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Shoot Growth (g/g)")+ theme(legend.position = 'none')+
+    geom_text(aes(x = st_long, y = sp_y, label = sp), size = 3, position = position_dodge(width = 0.75))+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+
+#####
+
+grow_q = grow_mass %>% filter(seedling_sp=="Q")%>% 
+  filter(treatment=="C")
+
+
+mv_tq = multcompLetters4(aov(grow_total~soil_type, data = grow_q), 
+                         TukeyHSD(aov(grow_total~soil_type, data = grow_q)))
+mv_rq = multcompLetters4(aov(grow_root~soil_type, data = grow_q), 
+                         TukeyHSD(aov(grow_root~soil_type, data = grow_q)))
+mv_sq = multcompLetters4(aov(grow_shoot~soil_type, data = grow_q), 
+                         TukeyHSD(aov(grow_shoot~soil_type, data = grow_q)))
+
+mv_tq_tib = tibble(soil_type = rownames(as.data.frame.list(mv_tq$`soil_type`)),
+                   tp = mv_tq$`soil_type`$Letters)
+mv_rq_tib = tibble(soil_type = rownames(as.data.frame.list(mv_rq$`soil_type`)),
+                   rp = mv_rq$`soil_type`$Letters)
+mv_sq_tib = tibble(soil_type = rownames(as.data.frame.list(mv_sq$`soil_type`)),
+                   sp = mv_sq$`soil_type`$Letters)
+
+grow_q_let = grow_q %>% 
+  left_join(mv_tq_tib)%>% 
+  left_join(mv_rq_tib)%>% 
+  left_join(mv_sq_tib) %>%
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil", 
+    soil_type == "C" ~ "Control soil"
+  )) %>% 
+  group_by(soil_type) %>% 
+  mutate(tq_y = quantile((grow_total), probs = .95, na.rm=T)+IQR((grow_total), na.rm=T))%>% 
+  mutate(rq_y = quantile((grow_root), probs = 0.95, na.rm=T)+IQR((grow_root), na.rm=T))%>% 
+  mutate(sq_y = quantile((grow_shoot), probs = 0.95, na.rm=T)+IQR((grow_shoot), na.rm=T))
+
+grow_qt=ggplot(grow_q_let, aes(x = st_long, y = grow_total, fill = soil_type))+
+  geom_point(position=position_jitterdodge(), aes(col = soil_type), alpha=0.8)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Total Growth (g/g)")+ theme(legend.position = 'none')+ 
+    geom_text(aes(x = st_long, y = tq_y, label = tp), size = 3, position = position_dodge(width = 0.75))+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+grow_qr=ggplot(grow_q_let, aes(x = st_long, y = grow_root, fill = soil_type))+
+  geom_point(position=position_jitterdodge(), aes(col = soil_type), alpha=0.8)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root Growth (g/g)")+ theme(legend.position = 'none')+
+    geom_text(aes(x = st_long, y = rq_y, label = rp), size = 3, position = position_dodge(width = 0.75))+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+grow_qs=ggplot(grow_q_let, aes(x = st_long, y = grow_shoot, fill = soil_type))+
+  geom_point(position=position_jitterdodge(), aes(col = soil_type), alpha=0.8)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Shoot Growth (g/g)")+ theme(legend.position = 'none')+
+    geom_text(aes(x = st_long, y = sq_y, label = sp), size = 3, position = position_dodge(width = 0.75))+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+```
+
+```{r}
+growthall = (grow_pr+grow_ps+grow_pt)/(grow_qr+grow_qs+grow_qt)
+#ggsave(plot = growthall, width = 9, height = 5, here("figures", "growth_notrt.png"))
+
+```
+
+```{r}
+
+mv_tp = multcompLetters4(aov(h_root/h_shoot~soil_type, data = grow_p), 
+                         TukeyHSD(aov(h_total~soil_type, data = grow_p)))
+mv_rp = multcompLetters4(aov(h_root~soil_type, data = grow_p), 
+                         TukeyHSD(aov(h_root~soil_type, data = grow_p)))
+mv_sp = multcompLetters4(aov(h_shoot~soil_type, data = grow_p), 
+                         TukeyHSD(aov(h_shoot~soil_type, data = grow_p)))
+
+mv_tp_tib = tibble(soil_type = rownames(as.data.frame.list(mv_tp$`soil_type`)),
+                   tp = mv_tp$`soil_type`$Letters)
+mv_rp_tib = tibble(soil_type = rownames(as.data.frame.list(mv_rp$`soil_type`)),
+                   rp = mv_rp$`soil_type`$Letters)
+mv_sp_tib = tibble(soil_type = rownames(as.data.frame.list(mv_sp$`soil_type`)),
+                   sp = mv_sp$`soil_type`$Letters)
+
+grow_p_let = grow_p %>% 
+  left_join(mv_tp_tib)%>% 
+  left_join(mv_rp_tib)%>% 
+  left_join(mv_sp_tib) %>%
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil", 
+    soil_type == "C" ~ "Sterile soil"
+  )) %>% 
+  group_by(soil_type) %>% 
+  mutate(tp_y = quantile((h_root/h_shoot), probs = .95, na.rm=T)+IQR((h_total), na.rm=T))%>% 
+  mutate(rp_y = quantile((h_root), probs = 0.95, na.rm=T)+IQR((h_root), na.rm=T))%>% 
+  mutate(sp_y = quantile((h_shoot), probs = 0.95, na.rm=T)+IQR((h_shoot), na.rm=T))
+
+grow_pt=ggplot(grow_p_let, aes(x = st_long, y = h_root/h_shoot, fill = soil_type))+
+   geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root:Shoot Ratio")+ theme(legend.position = 'none')+
+    geom_text(aes(x = st_long, y = tp_y, label = tp), size = 5)+no_grids+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+
+grow_pr=ggplot(grow_p_let, aes(x = st_long, y = h_root, fill = soil_type))+
+   geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root mass (g)")+ theme(legend.position = 'none')+
+    geom_text(aes(x = st_long, y = rp_y, label = rp), size = 5)+no_grids+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+grow_ps=ggplot(grow_p_let, aes(x = st_long, y = h_shoot, fill = soil_type))+
+   geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Shoot mass (g)")+ theme(legend.position = 'none')+
+    geom_text(aes(x = st_long, y = sp_y, label = sp), size = 5)+no_grids+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+
+#####
+
+grow_q = grow_mass %>% filter(seedling_sp=="Q")%>% 
+  filter(treatment=="C")
+
+
+mv_tq = multcompLetters4(aov(h_root/h_shoot~soil_type, data = grow_q), 
+                         TukeyHSD(aov(h_total~soil_type, data = grow_q)))
+mv_rq = multcompLetters4(aov(h_root~soil_type, data = grow_q), 
+                         TukeyHSD(aov(h_root~soil_type, data = grow_q)))
+mv_sq = multcompLetters4(aov(h_shoot~soil_type, data = grow_q), 
+                         TukeyHSD(aov(h_shoot~soil_type, data = grow_q)))
+
+mv_tq_tib = tibble(soil_type = rownames(as.data.frame.list(mv_tq$`soil_type`)),
+                   tp = mv_tq$`soil_type`$Letters)
+mv_rq_tib = tibble(soil_type = rownames(as.data.frame.list(mv_rq$`soil_type`)),
+                   rp = mv_rq$`soil_type`$Letters)
+mv_sq_tib = tibble(soil_type = rownames(as.data.frame.list(mv_sq$`soil_type`)),
+                   sp = mv_sq$`soil_type`$Letters)
+
+grow_q_let = grow_q %>% 
+  left_join(mv_tq_tib)%>% 
+  left_join(mv_rq_tib)%>% 
+  left_join(mv_sq_tib) %>%
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil", 
+    soil_type == "C" ~ "Sterile soil"
+  )) %>% 
+  group_by(soil_type) %>% 
+  mutate(tq_y = quantile((h_total), probs = 0.95, na.rm=T)+IQR((h_total), na.rm=T))%>% 
+  mutate(rq_y = quantile((h_root), probs = 0.95, na.rm=T)+IQR((h_root), na.rm=T))%>% 
+  mutate(sq_y = quantile((h_shoot), probs = 0.95, na.rm=T)+IQR((h_shoot), na.rm=T))
+
+grow_qt=ggplot(grow_q_let, aes(x = st_long, y = h_root/h_shoot, fill = soil_type))+
+   geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root:Shoot Ratio")+ theme(legend.position = 'none')+ 
+    geom_text(aes(x = st_long, y = tq_y, label = tp), size = 5)+no_grids+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+grow_qr=ggplot(grow_q_let, aes(x = st_long, y = h_root, fill = soil_type))+
+   geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Root mass (g)")+ theme(legend.position = 'none')+
+    geom_text(aes(x = st_long, y = rq_y, label = rp), size = 5)+no_grids+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+grow_qs=ggplot(grow_q_let, aes(x = st_long, y = h_shoot, fill = soil_type))+
+   geom_point(position = position_jitterdodge(jitter.width = .4), aes(col = soil_type), alpha = 0.25)+gg_soilcolor+
+  geom_boxplot(alpha = 0.75, outlier.shape = NA)+gg_soilfill+theme_minimal()+ 
+  labs(x = "Soil type", y = "Shoot mass (g)")+ theme(legend.position = 'none')+
+    geom_text(aes(x = st_long, y = sq_y, label = sp), size = 5)+no_grids+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+```
+```{r}
+# growthall = (grow_pr+grow_ps+grow_pt)/(grow_qr+grow_qs+grow_qt)
+# ggsave(plot = growthall, width = 9, height = 5, here("figures", "hmass_notrt.png"))
+library(cowplot)
+
+p_title <- ggdraw() + 
+  draw_label("Bigcones",x = 0, hjust = 0) +theme(plot.margin = margin(0, 0, 0, 7))
+
+q_title <- ggdraw() + 
+  draw_label("Oaks",x = 0, hjust = 0) +theme(plot.margin = margin(0, 0, 0, 7))
+
+plot_row1 <- plot_grid(grow_pr,grow_ps,grow_pt, nrow = 1)
+plot_row2 <- plot_grid(grow_qr,grow_qs,grow_qt, nrow = 1)
+
+harvest_plot = plot_grid(
+  p_title, plot_row1,q_title,plot_row2,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.2, 1,0.2,1)
+)
+
+save_plot(plot = harvest_plot, 
+  base_height = 5,
+  base_asp = 1.8,filename =  here("figures", "harvestmass_log_cow.jpg"))
+
+save_plot(plot = harvest_plot, 
+  base_height = 4,
+  base_asp = 1.8,filename =  here("figures", "harvestmass_log_cow_big.jpg"))
+```
+
+```{r}
+ndvi = health %>% 
+  dplyr::select(2:6) %>% 
+  filter(sample %in% c(3:4)) %>% 
+  left_join(total_treat) %>% 
+  filter(!soil_type == "C") %>% 
+  filter(!neighb_st == "C") %>% 
+  left_join(drought_treat)  %>% 
+  group_by(seedling_id) %>% 
+  summarize(ndvi = mean(mean_ndvi)) %>% 
+  left_join(total_treat) %>% left_join(drought_treat)%>% 
+  mutate(home_rank = case_when(
+    soil_type == seedling_sp  & soil_type==neighb_st ~ "Both",
+    soil_type == seedling_sp ~ "Self",
+    seedling_sp == neighb_st ~ "Neighbor",
+    .default = "None"
+  )) %>% 
+  mutate(home_rank = factor(home_rank, levels = c("None", "Neighbor", "Self", "Both"))) %>% 
+  filter(!is.na(seedling_sp))%>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  )) %>% 
+  filter(seedling_id %in% living$seedling_id)
+
+ndvi_p = multcompLetters4(aov(ndvi~treatment*home_rank, data = ndvi %>% filter(seedling_sp=="P")), 
+                         TukeyHSD(aov(ndvi~treatment*home_rank, data = ndvi%>% filter(seedling_sp=="P"))))
+
+mv_p_tib = tibble(longname = rownames(as.data.frame.list(ndvi_p$`treatment:home_rank`)),
+                   let = ndvi_p$`treatment:home_rank`$Letters) %>% 
+  separate(longname, into = c("treatment", "home_rank")) %>% 
+mutate(seedling_sp="P")
+
+ndvi_q = multcompLetters4(aov(ndvi~treatment*home_rank, data = ndvi %>% filter(seedling_sp=="Q")), 
+                         TukeyHSD(aov(ndvi~treatment*home_rank, data = ndvi%>% filter(seedling_sp=="Q"))))
+
+mv_q_tib = tibble(longname = rownames(as.data.frame.list(ndvi_q$`treatment:home_rank`)),
+                   let = ndvi_q$`treatment:home_rank`$Letters) %>% 
+  separate(longname, into = c("treatment", "home_rank")) %>% 
+mutate(seedling_sp="Q")
+
+
+letterset = bind_rows(mv_p_tib, mv_q_tib)
+ndvi_long = ndvi %>% 
+  left_join(letterset)%>% 
+  mutate(home_rank = factor(home_rank, levels = c("None", "Neighbor", "Self", "Both")))
+
+ggplot(ndvi_long, aes(x = home_rank, y = ndvi, fill = treatment))+
+  geom_point(position = position_jitterdodge(jitter.width = 0.1), aes(col = treatment), alpha = 0.25)+
+  geom_boxplot(alpha = 0.8)+facet_wrap(~sp_long)+theme_minimal()+gg_droughtfill+gg_droughtcolor+
+  labs(x="Home soil match", y="Mean NDVI")+
+    geom_text(aes(x = home_rank, y = .15, label = let), size = 3, position = position_dodge(width = 0.75))
+
+
+ndvi = health %>%
+  dplyr::select(2:7) %>%
+  left_join(total_treat) %>%
+  filter(!soil_type == "C") %>%
+  filter(!neighb_st == "C") %>%
+  left_join(drought_treat)  %>%
+  group_by(seedling_id) %>%
+  summarize(ndvi = mean(median_ndvi)) %>%
+  left_join(total_treat) %>% left_join(drought_treat)%>%
+  mutate(home_rank = case_when(
+    soil_type == seedling_sp  & soil_type==neighb_st ~ "Both",
+    soil_type == seedling_sp ~ "Self",
+    seedling_sp == neighb_st ~ "Neighbor",
+    .default = "None"
+  )) %>%
+  mutate(home_rank = factor(home_rank, levels = c("None", "Neighbor", "Self", "Both"))) %>%
+  filter(!is.na(seedling_sp))%>%
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  )) %>%
+  filter(seedling_id %in% living$seedling_id)
+
+
+
+ndvi_p = multcompLetters4(aov(ndvi~treatment*home_rank, data = ndvi %>% filter(seedling_sp=="P")), 
+                         TukeyHSD(aov(ndvi~treatment*home_rank, data = ndvi%>% filter(seedling_sp=="P"))))
+
+mv_p_tib = tibble(longname = rownames(as.data.frame.list(ndvi_p$`treatment:home_rank`)),
+                   let = ndvi_p$`treatment:home_rank`$Letters) %>% 
+  separate(longname, into = c("treatment", "home_rank")) %>% 
+mutate(seedling_sp="P")
+
+ndvi_q = multcompLetters4(aov(ndvi~treatment*home_rank, data = ndvi %>% filter(seedling_sp=="Q")), 
+                         TukeyHSD(aov(ndvi~treatment*home_rank, data = ndvi%>% filter(seedling_sp=="Q"))))
+
+mv_q_tib = tibble(longname = rownames(as.data.frame.list(ndvi_q$`treatment:home_rank`)),
+                   let = ndvi_q$`treatment:home_rank`$Letters) %>% 
+  separate(longname, into = c("treatment", "home_rank")) %>% 
+mutate(seedling_sp="Q")
+
+
+letterset = bind_rows(mv_p_tib, mv_q_tib)
+ndvi_long = ndvi %>% 
+  left_join(letterset)%>% 
+  mutate(home_rank = factor(home_rank, levels = c("None", "Neighbor", "Self", "Both")))
+
+ggplot(ndvi_long, aes(x = home_rank, y = ndvi, fill = treatment))+
+  geom_point(position = position_jitterdodge(jitter.width = 0.1), aes(col = treatment), alpha = 0.25)+
+  geom_boxplot(alpha = 0.8)+facet_wrap(~sp_long)+theme_minimal()+gg_droughtfill+gg_droughtcolor+
+  labs(x="Home soil match", y="Mean NDVI")+
+    geom_text(aes(x = home_rank, y = .15, label = let), size = 5, position = position_dodge(width = 0.75))
+
+```
+
+
+
+
+```{r}
+ndvi = health %>%
+  dplyr::select(2:7) %>%
+  left_join(total_treat) %>%
+  filter(!soil_type == "C") %>%
+  filter(!neighb_st == "C") %>%
+  left_join(drought_treat)  %>%
+  group_by(seedling_id) %>%
+  summarize(ndvi = mean(median_ndvi)) %>%
+  left_join(total_treat) %>% left_join(drought_treat)%>%
+  mutate(home_rank = case_when(
+    soil_type == seedling_sp  & soil_type==neighb_st ~ "Both",
+    soil_type == seedling_sp ~ "Self",
+    seedling_sp == neighb_st ~ "Neighbor",
+    soil_type == "C" & neighb_st == "C" ~ "Sterile",
+    .default = "None"
+  )) %>%
+  mutate(home_rank = factor(home_rank, levels = c("Sterile", "None", "Neighbor", "Self", "Both"))) %>%
+  filter(!is.na(seedling_sp))%>%
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  )) 
+
+ndvi = health %>%
+  dplyr::select(2:7) %>%
+  left_join(total_treat) %>%
+  filter(!soil_type == "C") %>%
+  filter(!neighb_st == "C") %>%
+  left_join(drought_treat)  %>%
+  filter(sample == 4) %>%
+  mutate(ndvi = (mean_ndvi)) %>%
+  left_join(total_treat) %>% left_join(drought_treat)%>%
+  mutate(home_rank = case_when(
+    soil_type == seedling_sp  & soil_type==neighb_st ~ "Both",
+    soil_type == seedling_sp ~ "Self",
+    seedling_sp == neighb_st ~ "Neighbor",
+    soil_type == "C" & neighb_st == "C" ~ "Sterile",
+    .default = "None"
+  )) %>%
+  mutate(home_rank = factor(home_rank, levels = c("Sterile", "None", "Neighbor", "Self", "Both"))) %>%
+  filter(!is.na(seedling_sp))%>%
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  )) 
+
+
+
+
+ndvi_p = multcompLetters4(aov(ndvi~treatment*home_rank, data = ndvi %>% filter(seedling_sp=="P")), 
+                         TukeyHSD(aov(ndvi~treatment*home_rank, data = ndvi%>% filter(seedling_sp=="P"))))
+
+mv_p_tib = tibble(longname = rownames(as.data.frame.list(ndvi_p$`treatment:home_rank`)),
+                   let = ndvi_p$`treatment:home_rank`$Letters) %>% 
+  separate(longname, into = c("treatment", "home_rank")) %>% 
+mutate(seedling_sp="P")
+
+ndvi_q = multcompLetters4(aov(ndvi~treatment*home_rank, data = ndvi %>% filter(seedling_sp=="Q")), 
+                         TukeyHSD(aov(ndvi~treatment*home_rank, data = ndvi%>% filter(seedling_sp=="Q"))))
+
+mv_q_tib = tibble(longname = rownames(as.data.frame.list(ndvi_q$`treatment:home_rank`)),
+                   let = ndvi_q$`treatment:home_rank`$Letters) %>% 
+  separate(longname, into = c("treatment", "home_rank")) %>% 
+mutate(seedling_sp="Q")
+
+
+letterset = bind_rows(mv_p_tib, mv_q_tib)
+ndvi_long = ndvi %>% 
+  left_join(letterset)%>% 
+  mutate(home_rank = factor(home_rank, levels = c("Sterile", "None", "Neighbor", "Self", "Both")))
+
+soil_match_plot = ggplot(ndvi_long, aes(x = home_rank, y = ndvi, fill = treatment))+
+  geom_point(position = position_jitterdodge(jitter.width = 0.08), aes(col = treatment), alpha = 0.5)+
+  geom_boxplot(alpha = 0.8, outlier.shape = NA)+facet_wrap(~sp_long)+theme_minimal()+gg_droughtfill+gg_droughtcolor+
+  labs(x="Home soil match", y="Mean NDVI")+
+    geom_text(aes(x = home_rank, y = .15, label = let), size = 5, position = position_dodge(width = 0.75))+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+
+soil_match_plot
+
+save_plot(plot = soil_match_plot,
+  base_height = 5,
+  base_asp = 1.8,filename =  here("figures", "soil_match_icom.jpg"))
+
+save_plot(plot = soil_match_plot,
+  base_height = 4,
+  base_asp = 1.8,filename =  here("figures", "soil_match_icom_big.jpg"))
+
+```
+
+```{r}
+ndvi = health %>%
+  dplyr::select(2:7) %>%
+  left_join(total_treat) %>%
+  filter(!soil_type == "C") %>%
+  filter(!neighb_st == "C") %>%
+  left_join(drought_treat)  %>%
+  group_by(seedling_id) %>%
+  summarize(ndvi = mean(median_ndvi)) %>%
+  left_join(total_treat) %>% left_join(drought_treat)%>%
+  mutate(home_rank = case_when(
+    soil_type == seedling_sp  & soil_type==neighb_st ~ "Both",
+    soil_type == seedling_sp ~ "Self",
+    seedling_sp == neighb_st ~ "Neighbor",
+    soil_type == "C" & neighb_st == "C" ~ "Sterile",
+    .default = "None"
+  )) %>%
+  mutate(home_rank = factor(home_rank, levels = c("Sterile", "None", "Neighbor", "Self", "Both"))) %>%
+  filter(!is.na(seedling_sp))%>%
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  )) 
+
+ndvi = health %>%
+  dplyr::select(2:7) %>%
+  left_join(total_treat) %>%
+  filter(!soil_type == "C") %>%
+  filter(!neighb_st == "C") %>%
+  left_join(drought_treat)  %>%
+  filter(sample == 4) %>%
+  mutate(ndvi = (mean_ndvi)) %>%
+  left_join(total_treat) %>% left_join(drought_treat)%>%
+  mutate(home_rank = case_when(
+    soil_type == seedling_sp  & soil_type==neighb_st ~ "Both",
+    soil_type == seedling_sp ~ "Self",
+    seedling_sp == neighb_st ~ "Neighbor",
+    soil_type == "C" & neighb_st == "C" ~ "Sterile",
+    .default = "None"
+  )) %>%
+  mutate(home_rank = factor(home_rank, levels = c("Sterile", "None", "Neighbor", "Self", "Both"))) %>%
+  filter(!is.na(seedling_sp))%>%
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  )) 
+
+
+
+
+ndvi_p = multcompLetters4(aov(ndvi~treatment*home_rank, data = ndvi %>% filter(seedling_sp=="P")), 
+                         TukeyHSD(aov(ndvi~treatment*home_rank, data = ndvi%>% filter(seedling_sp=="P"))))
+
+mv_p_tib = tibble(longname = rownames(as.data.frame.list(ndvi_p$`treatment:home_rank`)),
+                   let = ndvi_p$`treatment:home_rank`$Letters) %>% 
+  separate(longname, into = c("treatment", "home_rank")) %>% 
+mutate(seedling_sp="P")
+
+ndvi_q = multcompLetters4(aov(ndvi~treatment*home_rank, data = ndvi %>% filter(seedling_sp=="Q")), 
+                         TukeyHSD(aov(ndvi~treatment*home_rank, data = ndvi%>% filter(seedling_sp=="Q"))))
+
+mv_q_tib = tibble(longname = rownames(as.data.frame.list(ndvi_q$`treatment:home_rank`)),
+                   let = ndvi_q$`treatment:home_rank`$Letters) %>% 
+  separate(longname, into = c("treatment", "home_rank")) %>% 
+mutate(seedling_sp="Q")
+
+
+letterset = bind_rows(mv_p_tib, mv_q_tib)
+ndvi_long = ndvi %>% 
+  left_join(letterset)%>% 
+  mutate(home_rank = factor(home_rank, levels = c("Sterile", "None", "Neighbor", "Self", "Both")))
+
+soil_match_plot = ggplot(ndvi_long, aes(x = home_rank, y = ndvi, fill = treatment))+
+  geom_boxplot(alpha = 0.8, outlier.shape = NA)+facet_wrap(~sp_long)+theme_minimal()+
+  scale_fill_manual(name = "Watering\ntreatment", breaks = c( "C","D"), 
+                                   labels = c("Watered", "Drought"),
+                                   values = c("white", "#575757"))+
+  labs(x="Home soil match", y="Mean NDVI")+
+    geom_text(aes(x = home_rank, y = .15, label = let), size = 5, position = position_dodge(width = 0.75))+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1), panel.grid = element_blank())
+
+soil_match_plot
+
+cowplot::save_plot(plot = soil_match_plot,
+  base_height = 5,
+  base_asp = 1.8,filename =  here("figures", "soil_match_icom.jpg"))
+
+cowplot::save_plot(plot = soil_match_plot,
+  base_height = 4,
+  base_asp = 1.8,filename =  here("figures", "soil_match_icom_big.jpg"))
+
+```
+
+```{r}
+ndvi_p = multcompLetters4(aov(ndvi~treatment*home_rank, data = ndvi %>% filter(seedling_sp=="P")), 
+                         TukeyHSD(aov(ndvi~treatment*home_rank, data = ndvi%>% filter(seedling_sp=="P"))))
+
+mv_p_tib = tibble(longname = rownames(as.data.frame.list(ndvi_p$`treatment:home_rank`)),
+                   let = ndvi_p$`treatment:home_rank`$Letters) %>% 
+  separate(longname, into = c("treatment", "home_rank")) %>% 
+mutate(seedling_sp="P")
+
+ndvi_q = multcompLetters4(aov(ndvi~treatment*home_rank, data = ndvi %>% filter(seedling_sp=="Q")), 
+                         TukeyHSD(aov(ndvi~treatment*home_rank, data = ndvi%>% filter(seedling_sp=="Q"))))
+
+mv_q_tib = tibble(longname = rownames(as.data.frame.list(ndvi_q$`treatment:home_rank`)),
+                   let = ndvi_q$`treatment:home_rank`$Letters) %>% 
+  separate(longname, into = c("treatment", "home_rank")) %>% 
+mutate(seedling_sp="Q")
+
+
+letterset = bind_rows(mv_p_tib, mv_q_tib)
+ndvi_long = ndvi %>% 
+  left_join(letterset)%>% 
+  mutate(home_rank = factor(home_rank, levels = c("Sterile", "None", "Neighbor", "Self", "Both")))
+
+soil_match_plot = ggplot(ndvi_long, aes(x = home_rank, y = ndvi, fill = treatment))+
+  geom_boxplot(alpha = 0.8, outlier.shape = NA, col = "white")+
+  geom_point(position = position_jitterdodge(jitter.width = 0.08), aes(col = treatment), alpha = 0.5)+facet_wrap(~sp_long)+theme_minimal()+gg_droughtfill+gg_droughtcolor+
+  labs(x="Home soil match", y="Mean NDVI")+
+  theme(panel.border = element_rect(colour = "white", fill=NA, size=1))+white_theme+no_grids
+
+soil_match_plot
+
+# save_plot(plot = soil_match_plot,
+#   base_height = 5,
+#   base_asp = 1.8,filename =  here("figures", "soil_match_icom.jpg"))
+# 
+# save_plot(plot = soil_match_plot,
+#   base_height = 4,
+#   base_asp = 1.8,filename =  here("figures", "soil_match_icom_big.jpg"))
+
+cowplot::save_plot(plot = soil_match_plot,
+  base_height = 4,
+  base_asp = 1.8,filename =  here("figures", "soil_match_white.png"))
+
+
+soil_match_plot_bigcone = ggplot(ndvi_long %>% filter(seedling_sp == "P"), aes(x = home_rank, y = ndvi, fill = treatment))+
+  geom_boxplot(alpha = 0.8, outlier.shape = NA, col = "white")+
+  geom_point(position = position_jitterdodge(jitter.width = 0.08), aes(col = treatment), alpha = 0.5)+theme_minimal()+gg_droughtfill+gg_droughtcolor+
+  labs(x="Home soil match", y="Mean NDVI")+
+  theme(panel.border = element_rect(colour = "white", fill=NA, size=1))+white_theme+no_grids
+
+soil_match_plot_bigcone
+
+
+cowplot::save_plot(plot = soil_match_plot_bigcone,
+  base_height = 4,
+  base_asp = 1.5,filename =  here("figures", "soil_match_bigcone_white.png"))
+```
+
+```{r}
+ndvi = health %>%
+  dplyr::select(2:8) %>%
+  left_join(total_treat) %>%
+  filter(!soil_type == "C") %>%
+  filter(!neighb_st == "C") %>%
+  left_join(drought_treat) %>% 
+  filter(sample %in% 2:4) %>% 
+  group_by(seedling_id) %>%
+  summarize(ndvi = mean(mean_ndvi)) %>%
+  left_join(total_treat) %>% left_join(drought_treat)%>%
+  mutate(home_rank = case_when(
+    soil_type == seedling_sp  & soil_type==neighb_st ~ "Both",
+    soil_type == seedling_sp ~ "Self",
+    seedling_sp == neighb_st ~ "Neighbor",
+    soil_type == "C" & neighb_st == "C" ~ "Sterile",
+    .default = "None"
+  )) %>%
+  mutate(home_rank = factor(home_rank, levels = c("Sterile", "None", "Neighbor", "Self", "Both"))) %>%
+  filter(!is.na(seedling_sp))%>%
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  )) 
+
+
+
+
+ndvi_p = multcompLetters4(aov(ndvi~treatment*home_rank, data = ndvi %>% filter(seedling_sp=="P")), 
+                         TukeyHSD(aov(ndvi~treatment*home_rank, data = ndvi%>% filter(seedling_sp=="P"))))
+
+mv_p_tib = tibble(longname = rownames(as.data.frame.list(ndvi_p$`treatment:home_rank`)),
+                   let = ndvi_p$`treatment:home_rank`$Letters) %>% 
+  separate(longname, into = c("treatment", "home_rank")) %>% 
+mutate(seedling_sp="P")
+
+ndvi_q = multcompLetters4(aov(ndvi~treatment*home_rank, data = ndvi %>% filter(seedling_sp=="Q")), 
+                         TukeyHSD(aov(ndvi~treatment*home_rank, data = ndvi%>% filter(seedling_sp=="Q"))))
+
+mv_q_tib = tibble(longname = rownames(as.data.frame.list(ndvi_q$`treatment:home_rank`)),
+                   let = ndvi_q$`treatment:home_rank`$Letters) %>% 
+  separate(longname, into = c("treatment", "home_rank")) %>% 
+mutate(seedling_sp="Q")
+
+
+letterset = bind_rows(mv_p_tib, mv_q_tib)
+ndvi_long = ndvi %>% 
+  left_join(letterset)%>% 
+  mutate(home_rank = factor(home_rank, levels = c("Sterile", "None", "Neighbor", "Self", "Both")))
+
+soil_match_plot = ggplot(ndvi_long, aes(x = home_rank, y = ndvi, fill = treatment))+
+  geom_point(position = position_jitterdodge(jitter.width = 0.08), aes(col = treatment), alpha = 0.5)+
+  geom_boxplot(alpha = 0.8, outlier.shape = NA)+facet_wrap(~sp_long)+theme_minimal()+gg_droughtfill+gg_droughtcolor+
+  labs(x="Home soil match", y="Mean NDVI")+
+    geom_text(aes(x = home_rank, y = .15, label = let), size = 5, position = position_dodge(width = 0.75))+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+soil_match_plot
+
+```
+
+
+```{r}
+soil_match_plot
+
+# save_plot(plot = soil_match_plot, 
+#   base_height = 5,
+#   base_asp = 1.8,filename =  here("figures", "soil_match_icomxx.jpg"))
+```
+
+```{r}
+
+
+tip_comms = harvest_comm%>% 
+  left_join(trt) %>% 
+  pivot_longer(cols = 2:5, names_to = "taxon", values_to = "pct_col")%>% 
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Control soil"
+  ))
+
+ggplot(tip_comms, aes(x = as.factor(seedling_id), y = pct_col, fill = taxon))+
+  geom_bar(stat = "identity")+facet_grid(rows = vars(seedling_sp), cols = vars(soil_type), scales = "free")
+
+ggplot(tip_comms %>% 
+         filter(seedling_sp == "P"), 
+       aes(x = as.factor(seedling_id), y = pct_col, fill = taxon))+
+  geom_bar(stat = "identity")+facet_grid(rows = vars(seedling_sp), cols = vars(st_long), scales = "free")+
+  labs(title = "Bigcones", x = "Seedling", y = "Percent colonization")+theme_minimal()
+
+ggplot(tip_comms %>% 
+         filter(seedling_sp == "Q"), 
+       aes(x = as.factor(seedling_id), y = pct_col, fill = taxon))+
+  geom_bar(stat = "identity")+facet_grid(rows = vars(seedling_sp), cols = vars(st_long), scales = "free")+
+  labs(title = "Oaks", x = "Seedling", y = "Percent colonization")+theme_minimal()
+
+tipsum = tip_comms %>% 
+  group_by(seedling_sp, soil_type, taxon) %>% 
+  summarize(pct = mean(pct_col),
+            sd_col = sd(pct_col)) %>% 
+  mutate(Taxon = case_when(
+    taxon == "cenococcum_sp" ~"Cenococcum sp.",
+    taxon == "peziza_sp" ~"Peziza sp.",
+    taxon == "pustularia_sp" ~"Pustularia sp.",
+    taxon == "rhizopogon_hawkerae" ~"Rhizopogon hawkerae",
+    taxon == "melanogaster_sp" ~"Melanogaster sp.",
+    taxon == "tuber_sp" ~"Tuber sp."
+  ))%>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  ))%>% 
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Control soil"
+  ))
+
+harvest_tips
+
+library(viridis)
+
+
+ggplot(tipsum, aes(x = st_long, y = pct, fill = Taxon))+
+  geom_bar(stat = "identity")+facet_wrap(~sp_long)+theme_minimal()+
+  labs(x = "Soil type", y = "Average percent colonization")+
+  scale_fill_viridis(discrete = TRUE)
+#, option="turbo"
+
+ggplot(tipsum, aes(x = st_long, y = pct, fill = Taxon))+
+  geom_bar(stat = "identity")+facet_wrap(~sp_long)+theme_minimal()+
+  labs(x = "Soil type", y = "Average percent colonization")+ scale_fill_brewer(palette = "Set2")
+```
+
+
+```{r}
+multcompView::multcompLetters4(aov(grow_root~soil_type*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="P") ), TukeyHSD(aov(grow_root~soil_type*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="P"))))
+  
+   multcompView::multcompLetters4(aov(grow_rs~soil_type*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="P") ), TukeyHSD(aov(grow_shoot~soil_type*treatment, data = grow_mass %>% 
+               filter(seedling_sp=="P"))))
+
+ggplot(grow_mass %>% filter(seedling_sp=="P"), aes(x = soil_type, y = grow_root, fill = soil_type, col = treatment))+
+  geom_boxplot(outlier.shape = NA)+gg_soilfill+gg_droughtcolor
+
+ggplot(grow_mass %>% filter(seedling_sp=="P"), aes(x = soil_type, y = grow_rs, fill = soil_type, col = treatment))+
+  geom_boxplot(outlier.shape = NA)+gg_soilfill+gg_droughtcolor
+
+```
+
+
+```{r}
+ggplot(grow_mass %>% filter(treatment=="C"), aes(x=soil_type, y =grow_total))+
+  geom_boxplot()+facet_wrap(~seedling_sp, scales = "free")
+
+ggplot(grow_mass %>% filter(treatment=="C"), aes(x=soil_type, y =h_total))+
+  geom_boxplot()+facet_wrap(~seedling_sp, scales = "free")
+
+ptest = grow_mass %>% 
+  filter(treatment=="C") %>% 
+  filter(seedling_sp=="P")%>% 
+  left_join(rel_size) %>% 
+  left_join(n_relsize) %>% 
+  mutate(rel_size = rel_mass-n_relmass) %>% 
+  drop_na()
+
+grow_big = grow_mass%>% 
+  left_join(rel_size) %>% 
+  left_join(n_relsize) %>% 
+  mutate(rel_size = rel_mass-n_relmass)
+
+lmx = lm(grow_total~soil_type*neighb_sp*n_relmass*rel_mass*neighb_st*treatment, data = grow_big %>% 
+           filter(seedling_sp=="P"))
+
+lmx = lm(grow_total~soil_type*n_relmass*rel_mass*neighb_st*treatment, data = grow_big %>% 
+           filter(seedling_sp=="P") %>% 
+           filter(neighb_sp=="Q"))
+
+lmx_step = MASS::stepAIC(lmx)
+
+lmy = lm(eval(lmx_step$call))
+
+summary(lmy)
+```
+
+
+```{r}
+
+TukeyHSD(aov(h_rs~soil_type, data = ptest ))
+TukeyHSD(aov(h_root~soil_type, data = ptest))
+TukeyHSD(aov(h_shoot~soil_type, data = ptest))
+TukeyHSD(aov(h_total~soil_type, data = ptest))
+
+TukeyHSD(aov(grow_rs~neighb_sp, data = ptest ))
+TukeyHSD(aov(grow_root~neighb_sp, data = ptest))
+TukeyHSD(aov(grow_shoot~neighb_sp, data = ptest))
+TukeyHSD(aov(grow_total~neighb_sp, data = ptest))
+
+TukeyHSD(aov(grow_rs~neighb_st, data = ptest ))
+TukeyHSD(aov(grow_root~neighb_sp*neighb_st, data = ptest))
+TukeyHSD(aov(grow_shoot~neighb_sp*neighb_st, data = ptest))
+TukeyHSD(aov(grow_total~neighb_sp*neighb_st, data = ptest))
+
+
+TukeyHSD(aov(grow_root~soil_type, data = grow_mass %>% 
+         filter(seedling_sp == "Q") ))
+```
+
+
+
+
+
+```{r}
+ggplot(grow_mass, aes(x = soil_type, y = grow_total, fill = soil_type, col = treatment))+
+  facet_wrap(~seedling_sp, scales = "free")+geom_boxplot()+gg_soilfill+gg_droughtcolor
+
+ggplot(grow_mass, aes(x = soil_type, y = grow_root, fill = soil_type, col = treatment))+
+  facet_wrap(~seedling_sp, scales = "free")+geom_boxplot()+gg_soilfill+gg_droughtcolor
+
+ggplot(grow_mass, aes(x = soil_type, y = grow_shoot, fill = soil_type, col = treatment))+
+  facet_wrap(~seedling_sp, scales = "free")+geom_boxplot()+gg_soilfill+gg_droughtcolor
+
+ggplot(grow_mass, aes(x = soil_type, y = grow_rs, fill = soil_type, col = treatment))+
+  facet_wrap(~seedling_sp, scales = "free")+geom_boxplot()+gg_soilfill+gg_droughtcolor
+
+t.test(grow_rs~ treatment, data = grow_mass %>% 
+         filter(seedling_sp == "P") %>% 
+         filter(soil_type == "P"))
+```
+
+```{r}
+coldrt = colonization %>% 
+  left_join(total_treat) %>% left_join(drought_treat) %>% 
+  mutate(harvest_col = round(harvest_col,3)*1000)
+
+ggplot(coldrt %>% 
+         filter(harvest_col>0), aes(x = seedling_sp, y = harvest_col, fill = soil_type, col = treatment))+
+  geom_boxplot(alpha = 0.85)+gg_soilfill+gg_droughtcolor+geom_point(position = position_jitterdodge(jitter.width = 0.025))
+
+TukeyHSD(aov(harvest_col~soil_type*treatment, data = coldrt %>% 
+         filter(harvest_col>0) %>% 
+           filter(seedling_sp=="P")))
+
+model = lm(harvest_col~soil_type*treatment*neighb_sp*neighb_st, data = coldrt  %>% 
+           filter(seedling_sp=="P"))
+
+MASS::stepAIC(model)
+
+
+summary(lm(formula = harvest_col ~ soil_type + treatment + neighb_sp + 
+    neighb_st + soil_type:treatment + soil_type:neighb_st + neighb_sp:neighb_st, 
+    data = coldrt %>% filter(seedling_sp == "P")))
+```
+
+
+```{r}
+M3 <- pscl::zeroinfl(harvest_col ~ treatment*soil_type | ## Predictor for the Poisson process
+                 harvest_col, ## Predictor for the Bernoulli process;
+               dist = 'poisson',
+               data = coldrt %>% filter(seedling_sp == "P"))
+
+M4 <- pscl::zeroinfl(harvest_col ~ treatment*soil_type | ## Predictor for the Poisson process
+                 harvest_col, ## Predictor for the Bernoulli process;
+               dist = 'negbin',
+               data = coldrt %>% filter(seedling_sp == "P"))
+
+summary(M4)
+E2 <- resid(M3, type = "pearson")
+N  <- nrow(coldrt %>% filter(seedling_sp == "P"))
+p  <- length(coef(M3))  
+sum(E2^2) / (N - p)
+
+
+lmtest::lrtest(M3, M4)
+```
+
+
+```{r}
+total_model = (lm(grow_total~soil_type*neighb_sp*neighb_st*treatment*n_rel, data = grow_mass %>% 
+                    filter(seedling_sp == "P") %>% 
+                    filter(seedling_id %in% living$seedling_id)))
+#summary(total_model)
+model_choice = MASS::stepAIC(total_model)
+
+model_choice$call
+pmodtuk = summary(eval(model_choice$call))
+
+
+total_model = (lm(grow_total~soil_type*neighb_sp*neighb_st*treatment*n_rel, data = grow_mass %>% 
+                    filter(seedling_sp == "Q") %>% 
+                    filter(seedling_id %in% living$seedling_id)))
+#summary(total_model)
+model_choice = MASS::stepAIC(total_model)
+
+model_choice$call
+qmodtuk = summary((eval(model_choice$call)))
+
+pmodtuk
+qmodtuk
+
+TukeyHSD(aov(grow_total~soil_type+neighb_sp+neighb_st+treatment, data = grow_mass %>% 
+                    filter(seedling_sp == "Q") %>% 
+                    filter(seedling_id %in% living$seedling_id)))
+
+TukeyHSD(aov(grow_root~soil_type+neighb_sp+neighb_st+treatment, data = grow_mass %>% 
+                    filter(seedling_sp == "Q") %>% 
+                    filter(seedling_id %in% living$seedling_id)))
+
+TukeyHSD(aov(grow_shoot~soil_type+neighb_sp+neighb_st+treatment, data = grow_mass %>% 
+                    filter(seedling_sp == "Q") %>% 
+                    filter(seedling_id %in% living$seedling_id)))
+```
+
+```{r}
+droughtmass = grow_mass %>% 
+  left_join(health %>% 
+              filter(sample == 4) %>% 
+              select(seedling_id, mean_ndvi)) %>% 
+  filter(!is.na(neighb_st)) %>% 
+  filter(soil_type != "C")  
+
+ggplot(droughtmass, aes(x = neighb_sp, y = grow_total, fill = soil_type))+
+  geom_boxplot(alpha =0.85, outlier.shape = NA)+facet_grid(rows = vars(seedling_sp), cols = vars(neighb_st), scales = "free")+gg_droughtcolor+gg_soilfill
+
+
+ggplot(droughtmass, aes(x = neighb_sp, y = mean_ndvi, fill = soil_type))+
+  geom_boxplot(alpha =0.85, outlier.shape = NA)+facet_grid(rows = vars(seedling_sp), cols = vars(neighb_st), scales = "free")+gg_droughtcolor+gg_soilfill
+
+ggplot(droughtmass, aes(x = soil_type, y = mean_ndvi, col = neighb_sp, fill = treatment))+
+  geom_boxplot(alpha =0.75, outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_droughtfill+gg_nspcolor
+```
+
+
+```{r}
+harvest_comm
+
+tip_comms = harvest_comm %>% 
+  left_join(trt) %>% 
+  pivot_longer(cols = 2:5, names_to = "taxon", values_to = "pct_col")%>% 
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Control soil"
+  )) %>% 
+  left_join(total_treat) %>% 
+  filter(!is.na(neighb_st))%>% 
+  mutate(nst_long = case_when(
+    neighb_st == "P" ~ "Bigcone neighbor soil",
+    neighb_st == "Q" ~ "Oak neighbor soil",
+    neighb_st == "C" ~ "Control neighbor soil"
+  ))
+  
+  
+ggplot(tip_comms %>% 
+         filter(seedling_sp == "P"), 
+       aes(x = as.factor(seedling_id), y = pct_col, fill = taxon))+
+  geom_bar(stat = "identity")+facet_grid(rows = vars(nst_long), cols = vars(st_long), scales = "free")+
+  labs(title = "Bigcones", x = "Seedling", y = "Percent colonization")+theme_minimal()
+
+ggplot(tip_comms %>% 
+         filter(seedling_sp == "Q"), 
+       aes(x = as.factor(seedling_id), y = pct_col, fill = taxon))+
+  geom_bar(stat = "identity")+facet_grid(rows = vars(nst_long), cols = vars(st_long), scales = "free")+
+  labs(title = "Oaks", x = "Seedling", y = "Percent colonization")+theme_minimal()
+```
+
+## At repotting, colonization was correlated with total bigcone mass and with oak R:S ratio
+```{r}
+re_colo = repot_mass %>% 
+  left_join(colonization %>%  select(1:2)) %>% 
+  drop_na() %>% 
+  mutate(anycol = repot_col>0)
+
+
+base = lm(log(below_dry+above_dry)~soil_type*sqrt(repot_col)*anycol, data = re_colo %>%  filter(seedling_sp == "P"))
+
+bestmod = MASS::stepAIC(base)
+
+summary(eval(bestmod$call))
+
+ggplot(re_colo %>%  filter(seedling_sp == "P"),
+       aes(col = soil_type, x = sqrt(repot_col), y = (below_dry+above_dry)^2))+
+  geom_point()+gg_soilcolor+geom_smooth(method = "lm", se=F)
+
+
+base = lm(log(below_dry/above_dry)~soil_type*sqrt(repot_col)*anycol, data = re_colo %>%  filter(seedling_sp == "Q"))
+bestmod = MASS::stepAIC(base)
+
+summary(eval(bestmod$call))
+
+# ggplot(re_colo %>%  filter(seedling_sp == "Q"),
+#        aes(col = soil_type, x = repot_col, y = log(below_dry/above_dry)))+
+#   geom_point()+gg_soilcolor+geom_smooth(method = "lm", se=F)
+```
+
+
+```{r}
+df4 = harvest_mass %>%
+  rename(foliar_mass = foliar) %>% 
+  left_join(image_data) %>% 
+  left_join(drought_treat)%>% 
+  mutate(all_foliar = midday_foliar+foliar+predawn_foliar) %>% 
+  drop_na() %>% 
+  filter(all_foliar>0)%>% 
+  left_join(total_treat) %>% 
+  mutate(lma = foliar_mass/all_foliar)
+
+potmass = harvest_mass %>% 
+  mutate(total = shoot+root+foliar) %>% 
+  select(seedling_id, root, total) %>% 
+  left_join(total_treat) %>% 
+  left_join(harvest_mass %>%
+              mutate(total = shoot+root+foliar) %>% 
+              select(seedling_id, root, total) %>% 
+              rename(neighbor = seedling_id, n_root = root, n_total = total)) %>% 
+  mutate(pottotal = total+n_total) %>% 
+  mutate(potroot = root+n_root)%>% 
+  left_join(pot_df) %>% 
+  distinct() %>% 
+  filter(!is.na(spp)) %>% 
+  left_join(df4 %>%  select(seedling_id, lma)) %>% 
+  left_join(grow_mass %>% 
+              select(seedling_id, grow_total, grow_root))
+
+
+ggplot(potmass, aes(x = stt, y = total, fill = stt, col = soil_type))+
+  geom_boxplot(alpha = 0.8)+facet_grid(cols = vars(spp), rows = vars(drought))
+
+ggplot(potmass, aes(x = stt, y = root, fill = stt, col = soil_type))+
+  geom_boxplot(alpha = 0.8)+facet_grid(cols = vars(spp), rows = vars(drought))
+
+
+ggplot(potmass %>% filter(seedling_sp == "P"), aes(x = stt, y = grow_total, fill = stt, col = soil_type))+
+  geom_boxplot(alpha = 0.8)+facet_grid(cols = vars(spp), rows = vars(drought))
+ggplot(potmass %>% filter(seedling_sp == "Q"), aes(x = stt, y = grow_total, fill = stt, col = soil_type))+
+  geom_boxplot(alpha = 0.8)+facet_grid(cols = vars(spp), rows = vars(drought))
+
+ggplot(potmass %>% filter(seedling_sp == "P"), aes(x = stt, y = grow_root, fill = stt, col = soil_type))+
+  geom_boxplot(alpha = 0.8)+facet_grid(cols = vars(spp), rows = vars(drought))
+ggplot(potmass %>% filter(seedling_sp == "Q"), aes(x = stt, y = grow_root, fill = stt, col = soil_type))+
+  geom_boxplot(alpha = 0.8)+facet_grid(cols = vars(spp), rows = vars(drought))
+
+
+ggplot(potmass %>% filter(seedling_sp == "P"), aes(x = soil_type, y = grow_root, fill = stt, col = soil_type))+
+  geom_boxplot(alpha = 0.8)+facet_grid(cols = vars(spp), rows = vars(drought))
+ggplot(potmass %>% filter(seedling_sp == "Q"), aes(x = soil_type, y = grow_root, fill = stt, col = soil_type))+
+  geom_boxplot(alpha = 0.8)+facet_grid(cols = vars(spp), rows = vars(drought))
+```
+
+
+```{r}
+ggplot(potmass, aes(x = root, y = potroot, col = seedling_sp))+
+  geom_point()+facet_wrap(~spp)
+
+ggplot(potmass, aes(x = potroot, y = lma, col = seedling_sp))+
+  geom_point()+facet_wrap(~spp)
+
+ggplot(potmass, aes(x = potroot, y = grow_root, col = seedling_sp))+
+  geom_point()+facet_wrap(~spp)
+
+ggplot(potmass, aes(x = pottotal, y = grow_total, col = seedling_sp))+
+  geom_point()+facet_wrap(~spp, scales = "free")
+```
+
+Does repotting RS predict eventual growth? 
+```{r}
+grow_mass
+
+ggplot(grow_mass, aes(x = r_rs, y = grow_total, col = soil_type))+
+  geom_point()+facet_wrap(~seedling_sp, scales = "free")+gg_soilcolor+geom_smooth(method = "lm", se = F)
+
+longmod = lm(grow_total~ soil_type*neighb_sp*neighb_st*treatment*r_rs, data = grow_mass %>% 
+               filter(seedling_sp == "Q"))
+
+modsel = MASS::stepAIC(longmod)
+
+summary(eval(modsel$call))
+AIC(lm(grow_root~ soil_type, data = grow_mass %>% 
+               filter(seedling_sp == "Q")))
+summary(lm(grow_root~ soil_type, data = grow_mass %>% 
+               filter(seedling_sp == "Q")))
+```
+
+
+
+Do you grow more or less than usual in each of your co-planting conditions?
+```{r}
+exp_mass = grow_mass %>% 
+  select(seedling_id, soil_type, seedling_sp, grow_total, grow_root, grow_shoot) %>% 
+  drop_na() %>% 
+  group_by(soil_type, seedling_sp) %>% 
+  mutate(exp_total = (grow_total-mean(grow_total))/sd(grow_total))%>% 
+  mutate(exp_root = (grow_root-mean(grow_root))/sd(grow_root))%>% 
+  mutate(exp_shoot = (grow_shoot-mean(grow_shoot))/sd(grow_shoot)) %>% 
+  ungroup() %>% 
+  left_join(total_treat) %>% 
+  left_join(drought_treat) %>% 
+  left_join(pot_df)
+
+exp_mass = exp_mass %>% 
+  left_join(exp_mass %>%  select(seedling_id, exp_total) %>% rename(neighbor = seedling_id, nexp_total = exp_total))
+
+ggplot(exp_mass %>% filter(seedling_sp == "P"), aes(x = soil_type, y = exp_total, fill = stt, col = soil_type))+
+  geom_boxplot(alpha = 0.8)+facet_grid(cols = vars(spp), rows = vars(treatment))
+ggplot(exp_mass %>% filter(seedling_sp == "Q"), aes(x = soil_type, y = exp_total, fill = stt, col = soil_type))+
+  geom_boxplot(alpha = 0.8)+facet_grid(cols = vars(spp), rows = vars(treatment))
+
+ggplot(exp_mass %>% filter(seedling_sp == "Q"), aes(x = exp_total, y = nexp_total,  col = stt))+
+  geom_point()+facet_grid(cols = vars(spp), rows = vars(treatment))+geom_smooth(method = "lm", se = F)
+
+ggplot(exp_mass %>% filter(seedling_sp == "P"), aes(x = exp_total, y = nexp_total,  col = stt))+
+  geom_point()+facet_grid(cols = vars(spp), rows = vars(treatment))+geom_smooth(method = "lm", se = F)
+
+```
+
+
+```{r}
+testset = grow_mass %>% filter(seedling_sp == "P") %>% 
+             filter(seedling_id %in% living$seedling_id) %>% 
+  left_join(health %>% 
+              select(seedling_id, sample, mean_ndvi) %>% 
+              group_by(seedling_id) %>% 
+              mutate(mean_ndvi = mean(mean_ndvi)))%>% 
+  left_join(df4 %>%  select(seedling_id, lma))
+
+
+
+psum = (lm(h_total~treatment*soil_type*neighb_st*neighb_sp, 
+           data = testset))
+step_p = MASS::stepAIC(psum)
+
+TukeyHSD(aov(eval(step_p$call)))
+
+# TukeyHSD(aov(grow_total~treatment, grow_mass %>% filter(seedling_sp == "P")))
+sd(testset$h_rs, na.rm = T)
+```
+
+can I show root growth decreased with drought in bigcones? 
+```{r}
+bcroot = grow_mass %>% 
+  filter(seedling_sp == "P") %>% 
+  group_by(neighb_sp, neighb_st) %>% 
+  filter(!is.na(grow_root)) %>% filter(is.finite(grow_root)) %>% 
+  mutate(root_avg = (grow_root -mean(grow_root))/sd(grow_root))
+
+ggplot(bcroot, aes(x = soil_type, y = root_avg, fill = treatment))+
+  geom_boxplot(alpha = 0.8)
+
+bcroot = grow_mass %>% 
+  filter(seedling_sp == "P") %>% 
+  group_by(neighb_sp, neighb_st) %>% 
+  filter(!is.na(grow_root)) %>% filter(is.finite(grow_root)) %>% 
+  mutate(root_avg = (grow_total -mean(grow_total))/sd(grow_total))
+
+ggplot(bcroot, aes(x = soil_type, y = root_avg, fill = treatment))+
+  geom_boxplot(alpha = 0.8)
+
+bcroot = grow_mass %>% 
+  filter(seedling_sp == "P") %>% 
+  group_by(neighb_sp, neighb_st) %>% 
+  filter(!is.na(grow_root)) %>% filter(is.finite(grow_root)) %>% 
+  mutate(root_avg = (grow_shoot -mean(grow_shoot))/sd(grow_shoot))
+
+ggplot(bcroot, aes(x = soil_type, y = root_avg, fill = treatment))+
+  geom_boxplot(alpha = 0.8)
+```
+
+
+Do any of these things correlate with stress?
+
+```{r}
+bc_health = grow_mass %>% 
+  filter(seedling_sp == "P") %>% 
+  left_join(health %>% 
+              select(seedling_id, sample, mean_ndvi) %>% 
+              group_by(seedling_id) %>% 
+              mutate(mean_ndvi = mean(mean_ndvi))) %>% 
+  filter(!is.na(treatment)) %>% 
+  filter(seedling_id %in% living$seedling_id)  %>% 
+  left_join(df4 %>%  select(seedling_id, lma))
+
+ggplot(bc_health, aes(x = sqrt(grow_total), y = mean_ndvi, col = soil_type))+
+  geom_point()+geom_smooth(method = 'lm', se = F)+gg_soilcolor
+
+ggplot(bc_health, aes(x = mean_ndvi, y = lma, col = soil_type))+
+  geom_point()+geom_smooth(method = 'lm', se = F)+gg_soilcolor+facet_wrap(~treatment)
+
+
+summary(lm(sqrt(grow_total)~soil_type+mean_ndvi, data =bc_health ))
+```
+
+```{r}
+grow_mass
+
+ggplot(grow_mass, aes(x = seedling_sp, y = grow_rs, fill = treatment))+
+  geom_boxplot()+scale_y_log10()
+
+ggplot(grow_mass, aes(x = seedling_sp, y = h_rs, fill = treatment))+
+  geom_boxplot()+scale_y_log10()
+
+ggplot(grow_mass, aes(x = soil_type, y = h_rs, fill = treatment))+
+geom_boxplot()+scale_y_log10()+facet_wrap(~seedling_sp)
+
+phys = harvest_mass %>% 
+  left_join(total_treat) %>% 
+  left_join(drought_treat) %>% 
+  filter(!is.na(seedling_sp)) %>% 
+  filter(seedling_id %in% living$seedling_id) %>% 
+  left_join(measure %>% 
+         filter(date == "2023-03-01") %>% select(seedling_id, diameter_mm))
+
+ggplot(ndvi, aes(x = treatment, y = ndvi, fill = treatment))+
+geom_boxplot()+facet_wrap(~seedling_sp)
+```
+
+
+```{r}
+oak_ndvi = ndvi %>% 
+  filter(seedling_sp == "P") %>% 
+  filter(seedling_id %in% living$seedling_id)%>% 
+  left_join(drought_treat) %>% 
+  group_by(treatment) %>% 
+  drop_na() %>% 
+  summarize(mean_ndvi = mean(ndvi),
+            sd_ndvi = sd(ndvi), 
+            num = n())
+
+ndvi_test = ndvi %>% 
+  filter(seedling_id %in% living$seedling_id)%>% 
+  left_join(drought_treat)
+
+ggplot(ndvi_test, aes(x = seedling_sp, y = ndvi, fill = treatment))+
+  geom_boxplot()
+
+t.test(ndvi~treatment, ndvi_test %>% filter(seedling_sp == "Q"))
+
+pct_dif = 100*((oak_ndvi$mean_ndvi[1]-oak_ndvi$mean_ndvi[2])/oak_ndvi$mean_ndvi[2])
+sd_dif = sqrt((((oak_ndvi$sd_ndvi[1])^2)/oak_ndvi$num[1]) + (((oak_ndvi$sd_ndvi[2])^2)/oak_ndvi$num[2] ))
+sd_difference_percent =  (sd_dif / oak_ndvi$mean_ndvi[1]) * 100
+
+p.tval = 3.6
+q.tval = 5.4
+```
+
+
+## tips counting for manuscript
+
+```{r}
+harvest_tipcount = harvest_tips %>% 
+  mutate(seedling_id = as.numeric(seedling_id)) %>% 
+  left_join(total_treat) %>% 
+  mutate(total_tips = colonized+uncolonized) %>% 
+  mutate(col_true = colonized>0) %>% 
+  group_by(seedling_sp, soil_type, col_true) %>% 
+  filter(!is.na(total_tips)) %>% 
+  summarize(n = n(), min = min(total_tips), ave = mean(total_tips))
+
+
+harvest_tipcount = harvest_tips %>% 
+  mutate(seedling_id = as.numeric(seedling_id)) %>% 
+  left_join(total_treat) %>% 
+  mutate(total_tips = colonized+uncolonized) %>% 
+  mutate(col_true = colonized>0) %>% 
+  group_by(seedling_sp, col_true) %>% 
+  filter(!is.na(total_tips)) %>% 
+  summarize(n = n(), min = min(total_tips), ave = mean(total_tips))
+```
+
+
+

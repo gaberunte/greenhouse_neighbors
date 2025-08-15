@@ -1,0 +1,797 @@
+---
+title: "just figure dev"
+author: "Gabe Runte"
+date: "2024-03-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(here)
+library(lubridate)
+#library(MASS)
+library(janitor)
+library(RColorBrewer)
+library(multcompView)
+library(kableExtra)
+library(tidyverse)
+library(patchwork)
+source(here("src", "colors.R"))
+```
+
+# Datasets
+```{r, message = F, warning = F}
+measure = read_csv(here("data", "analysis/size_master.csv"))
+harvest = read_csv(here("data", "analysis/harvest_metrics.csv")) 
+health = read_csv(here("data", "analysis/ndvi_data.csv"))
+harvest_tips = read_csv(here("data", "analysis/harvest_roottips - all.csv"))
+repot_tips = read_csv(here("data", "repotting/ghecto_repotting_root_pulling_data.csv"))
+repot_mass = read_csv(here("data", "repotting", "repotting_drymass_fitted.csv"))
+harvest_mass = read_csv(here("data", "harvest", "harvest_biomass_wideclean.csv"))
+image_data = read_csv(here("data", "wide_final_seedling_area.csv")) %>% 
+  mutate(foliar = foliar+midday_foliar+predawn_foliar) %>% select(-midday_foliar, -predawn_foliar)
+neighb_pairs = read_csv(here("data", "design", "ghecto_neighbor_pairs.csv"))
+trt = read_csv(here("data", "design", "seedling_treatments.csv"))
+drought = read_csv(here("data", "design", "drought_assignments_bypot.csv")) %>% 
+  select(1,3)
+harvest_comm = read_csv( here("data", "harvest", "harvest_community_matrix_scaled.csv"))
+
+pressure = read_csv(here("data/harvest", "pressure_bomb - Sheet1.csv")) %>% 
+  select(1:4) %>%  mutate(time = tolower(time))
+sapwood = read_csv(here("data/harvest", "harvest_sapwood.csv"))
+```
+
+```{r, message = F, include = F, warning = F}
+colonization = repot_tips %>% 
+  mutate(repot_col = colonization_numerator/colonization_denominator) %>% 
+  select(seedling_id, repot_col) %>% 
+  left_join(harvest_tips %>% mutate(harvest_col = colonized/(colonized+uncolonized)) %>% 
+              select(seedling_id, harvest_col) %>% 
+              mutate(seedling_id = as.numeric(seedling_id)))
+
+drought_treat = health %>% 
+  select(seedling_id, treatment) %>% distinct()
+
+total_treat = measure %>% 
+  select(seedling_id, seedling_sp, soil_type, neighbor, neighb_sp, neighb_st, pot) %>% distinct() %>% drop_na() %>% 
+  left_join(drought_treat)%>%
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  ))%>%
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Control soil"
+  ))%>%
+  mutate(nst_long = case_when(
+    neighb_st == "P" ~ "Neighbor Bigcone soil",
+    neighb_st == "Q" ~ "Neighbor Oak soil",
+    neighb_st == "C" ~ "Neighbor Control soil"
+  ))%>%
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  )) %>%
+  mutate(nsp_long = case_when(
+    neighb_sp == "P" ~ "Neighbor Bigcone",
+    neighb_sp == "Q" ~ "Neighbor Oak"
+  ))%>% 
+  mutate(neighb_st = fct_relevel(neighb_st, "P", "Q","C"))%>% 
+  mutate(soil_type = fct_relevel(soil_type, "P", "Q", "C"))%>% 
+  mutate(nst_long = fct_relevel(nst_long, "Neighbor Bigcone soil", "Neighbor Oak soil", "Neighbor Control soil"))%>%
+  mutate(st_long = fct_relevel(st_long, "Bigcone soil", "Oak soil", "Control soil"))%>%
+  mutate(st_longish = case_when(
+    soil_type == "P" ~ "Bigcone",
+    soil_type == "Q" ~ "Oak",
+    soil_type == "C" ~ "Sterile"
+  ))
+
+# image_df = image_data %>% left_join(total_treat) %>% 
+#   mutate(total_foliar = foliar+predawn_foliar+midday_foliar) %>% 
+#   left_join(drought_treat)
+
+sort_string_chars <- function(s) {
+  paste(sort(unlist(strsplit(s, ""))), collapse = "")
+}
+
+pot_df = neighb_pairs %>% 
+  rename(seedling_id = seedling_1) %>% 
+  left_join(trt) %>% 
+  rename(sp1 = seedling_sp, st1 = soil_type) %>% 
+  select(!seedling_id) %>% 
+  rename(seedling_id = seedling_2) %>% 
+  left_join(trt)%>% 
+  rename(sp2 = seedling_sp, st2 = soil_type) %>% 
+  mutate(spp = paste0(sp1, sp2))%>% 
+  mutate(stt = paste0(st1, st2)) %>% 
+  select(pot, spp, stt) %>% 
+  mutate(spp = map_chr(spp, sort_string_chars)) %>% #alphabetize the combo to minimize different uniques
+  mutate(stt = map_chr(stt, sort_string_chars)) %>% 
+  left_join(drought)
+
+masschange = repot_mass %>% 
+  rename(r_root = below_dry, r_shoot = above_dry) %>% 
+  left_join(harvest_mass %>% 
+              mutate(shoot = shoot+foliar) %>% 
+              select(-foliar) %>% 
+              rename(h_shoot = shoot, h_root = root)) %>% 
+  mutate(d_root = h_root/r_root, d_shoot = h_shoot/r_shoot, d_total = (h_root+h_shoot)/(r_root+r_shoot)) %>% 
+  left_join(total_treat)
+
+living = measure %>% 
+  filter(date == "2022-04-01") %>% 
+  filter(alive ==1) %>% 
+  select(seedling_id)
+```
+
+nspxnst
+```{r}
+nplt = masschange %>%
+  filter(seedling_id %in% living$seedling_id) %>% 
+  filter(soil_type != "C")
+
+anova = aov(aov(d_total~seedling_sp*neighb_sp*treatment, data = nplt))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$`seedling_sp:neighb_sp:treatment`)
+  htib = tibble(snt = rownames(dfx),
+                seedling_sp = str_sub(snt, 1,1),
+                neighb_sp = str_sub(snt, 3,3),
+                treatment = str_sub(snt, 5,5),
+                letters = dfx$Letters) %>% 
+    select(-snt)
+  
+nplt_let = nplt %>%  left_join(htib)%>% 
+  group_by(seedling_sp, neighb_sp, treatment) %>% 
+  mutate(lab_y = quantile(d_total, probs = 0.75, na.rm = T)+IQR(d_total, na.rm = T)*1.75)
+
+
+ggplot(nplt_let, aes(x = treatment, y = d_total, fill = neighb_sp, col = treatment))+
+  geom_boxplot(outlier.shape = NA, alpha = 0.8)+
+  facet_wrap(~seedling_sp, scales = "free")+
+  gg_nspfill+gg_droughtcolor+theme_minimal()+
+    geom_text(aes(x = treatment, y = lab_y, label = letters), size = 5, position = position_dodge(width = 0.75))+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))+
+  labs(x = "Watering treatment", y = "Total growth (g)")
+
+anova = aov(aov(d_total~seedling_sp*neighb_st*treatment, data = nplt))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$`seedling_sp:neighb_st:treatment`)
+  htib = tibble(snt = rownames(dfx),
+                seedling_sp = str_sub(snt, 1,1),
+                neighb_st = str_sub(snt, 3,3),
+                treatment = str_sub(snt, 5,5),
+                letters = dfx$Letters) %>% 
+    select(-snt)
+  
+nplt_let = nplt %>%  left_join(htib)%>% 
+  group_by(seedling_sp, neighb_st, treatment) %>% 
+  mutate(lab_y = quantile(d_total, probs = 0.75, na.rm = T)+IQR(d_total, na.rm = T)*1.75)
+
+ggplot(nplt_let, aes(x = treatment, y = d_total, fill = neighb_st, col = treatment))+
+  geom_boxplot(outlier.shape = NA, alpha = 0.8)+
+  facet_wrap(~seedling_sp, scales = "free")+
+  gg_nsoilfill+gg_droughtcolor+theme_minimal()+
+    geom_text(aes(x = treatment, y = lab_y, label = letters), size = 5, position = position_dodge(width = 0.75))+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+```
+
+```{r}
+nplt = masschange %>%
+  filter(seedling_id %in% living$seedling_id) %>% 
+  filter(soil_type != "C")
+
+anova = aov(aov(d_total~seedling_sp*neighb_sp*treatment, data = nplt))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$`seedling_sp:neighb_sp:treatment`)
+  htib = tibble(snt = rownames(dfx),
+                seedling_sp = str_sub(snt, 1,1),
+                neighb_sp = str_sub(snt, 3,3),
+                treatment = str_sub(snt, 5,5),
+                letters = dfx$Letters) %>% 
+    select(-snt)
+  
+nplt_let = nplt %>%  left_join(htib)%>% 
+  group_by(seedling_sp, neighb_sp, treatment) %>% 
+  mutate(lab_y = quantile(d_total, probs = 0.75, na.rm = T)+IQR(d_total, na.rm = T)*1.75)
+
+
+ggplot(nplt_let, aes(x = treatment, y = d_total, fill = neighb_sp, col = treatment))+
+  geom_boxplot(outlier.shape = NA, alpha = 0.8)+
+  facet_wrap(~seedling_sp, scales = "free")+
+  gg_nspfill+gg_droughtcolor+theme_minimal()+
+    geom_text(aes(x = treatment, y = lab_y, label = letters), size = 5, position = position_dodge(width = 0.75))+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))+
+  labs(x = "Watering treatment", y = "Total growth (g)")
+
+anova = aov(aov(d_total~seedling_sp*neighb_sp*neighb_st*treatment, data = nplt))
+  tuk = TukeyHSD(anova)
+  tuk$`seedling_sp:neighb_sp:neighb_st`[!complete.cases(tuk$`seedling_sp:neighb_sp:neighb_st`),] <- 0
+  tuk$`seedling_sp:neighb_sp:neighb_st:treatment`[!complete.cases(tuk$`seedling_sp:neighb_sp:neighb_st:treatment`),] <- 0
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$`seedling_sp:neighb_sp:neighb_st:treatment`)
+  htib = tibble(snt = rownames(dfx),
+                seedling_sp = str_sub(snt, 1,1),
+                neighb_sp = str_sub(snt, 3,3),
+                neighb_st = str_sub(snt, 5,5),
+                treatment = str_sub(snt, 7,7),
+                letters = dfx$Letters) %>% 
+    select(-snt)
+  
+nplt_let = nplt %>%  left_join(htib)%>% 
+  group_by(seedling_sp, neighb_sp,neighb_st, treatment) %>% 
+  mutate(lab_y = quantile(d_total, probs = 0.75, na.rm = T)+IQR(d_total, na.rm = T)*1.75)
+
+ggplot(nplt_let, aes(x = treatment, y = d_total, fill = neighb_st, col = treatment))+
+  geom_boxplot(outlier.shape = NA, alpha = 0.8)+
+  facet_wrap(neighb_sp~seedling_sp, scales = "free")+
+  gg_nsoilfill+gg_droughtcolor+theme_minimal()+
+    geom_text(aes(x = treatment, y = lab_y, label = letters), size = 5, position = position_dodge(width = 0.75))+
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=1))
+```
+
+
+
+```{r}
+std_mass = masschange %>% 
+  filter(seedling_id %in% living$seedling_id) %>% 
+  group_by(seedling_sp) %>% 
+  drop_na() %>% 
+  mutate(r_total = r_root+r_shoot) %>% 
+  mutate(h_total = h_root+h_shoot)%>%  
+  mutate(r_rs = r_root/r_shoot)%>%  
+  mutate(d_rs = d_root/d_shoot)%>% 
+  mutate(h_rs = h_root/h_shoot)%>% 
+  mutate(r_rs = (r_rs-mean(r_rs))/sd(r_rs))%>% 
+  mutate(d_rs = (d_rs-mean(d_rs))/sd(d_rs))%>% 
+  mutate(h_rs = (h_rs-mean(h_rs))/sd(h_rs))%>%  
+  mutate(h_total = (h_total-mean(h_total))/sd(h_total))%>%  
+  mutate(r_total = (r_total-mean(r_total))/sd(r_total))%>% 
+  mutate(r_shoot = (r_shoot-mean(r_shoot))/sd(r_shoot))%>% 
+  mutate(r_root = (r_root-mean(r_root))/sd(r_root))%>% 
+  mutate(h_shoot = (h_shoot-mean(h_shoot))/sd(h_shoot))%>% 
+  mutate(h_root = (h_root-mean(h_root))/sd(h_root))%>% 
+  mutate(d_root = (d_root-mean(d_root))/sd(d_root))%>% 
+  mutate(d_shoot = (d_shoot-mean(d_shoot))/sd(d_shoot))%>% 
+  mutate(d_total = (d_total-mean(d_total))/sd(d_total)) %>% 
+  mutate(neighb_st = fct_relevel(neighb_st, "C", "P", "Q"))
+
+repot_proot = lm(r_root~soil_type, data = std_mass %>% filter(seedling_sp == "P"))
+repot_pshoot = lm(r_shoot~soil_type, data = std_mass %>% filter(seedling_sp == "P"))
+repot_prs = lm(r_rs~soil_type, data = std_mass %>% filter(seedling_sp == "P"))
+
+p_rrootsum = summary(repot_proot)
+rroot_df = data.frame(p_rrootsum$coefficients)
+repot_proottib = tibble(rroot_df) %>% 
+  mutate(predictor = rownames(rroot_df)) %>% 
+  rename(est_rroot = 1) %>% 
+  rename(sig_rroot = 4) %>% 
+  mutate(sig_rroot = sig_rroot < 0.05)%>% 
+  dplyr::select(1,4,5)
+
+p_rshootsum = summary(repot_pshoot)
+rshoot_df = data.frame(p_rshootsum$coefficients)
+repot_pshoottib = tibble(rshoot_df) %>% 
+  mutate(predictor = rownames(rshoot_df)) %>% 
+  rename(est_rshoot = 1) %>% 
+  rename(sig_rshoot = 4) %>% 
+  mutate(sig_rshoot = sig_rshoot < 0.05)%>% 
+  dplyr::select(1,4,5)
+
+p_rrssum = summary(repot_prs)
+rrs_df = data.frame(p_rrssum$coefficients)
+repot_prstib = tibble(rrs_df) %>% 
+  mutate(predictor = rownames(rrs_df)) %>% 
+  rename(est_rrs = 1) %>% 
+  rename(sig_rrs = 4) %>% 
+  mutate(sig_rrs = sig_rrs < 0.05)%>% 
+  dplyr::select(1,4,5)
+
+repot_table = repot_proottib %>% left_join(repot_pshoottib) %>% left_join(repot_prstib) %>% 
+  relocate(predictor) %>% 
+  mutate(est_rroot = replace_na(est_rroot, "")) %>% 
+  rename("Repot root" = est_rroot, "Repot shoot" = est_rshoot,"Repot R:S" = est_rrs)
+
+
+
+kable(repot_table %>% dplyr::select(1,2,4,6))  %>%
+  column_spec(2, bold = ifelse(repot_table$sig_rroot == T, TRUE, FALSE))%>%
+  column_spec(3, bold = ifelse(repot_table$sig_rshoot == T, TRUE, FALSE))%>%
+  column_spec(4, bold = ifelse(repot_table$sig_rrs == T, TRUE, FALSE)) %>%
+  kable_styling() %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+  
+```
+```{r}
+growth_proot = lm(d_root~soil_type+neighb_sp+neighb_st+treatment, 
+                   data = std_mass %>% filter(seedling_sp == "P"))
+growth_pshoot = lm(d_shoot~soil_type+neighb_sp+neighb_st+treatment, 
+                    data = std_mass %>% filter(seedling_sp == "P"))
+growth_prs = lm(d_rs~soil_type+neighb_sp+neighb_st+treatment, 
+                 data = std_mass %>% filter(seedling_sp == "P"))
+
+p_drootsum = summary(growth_proot)
+droot_df = data.frame(p_drootsum$coefficients)
+growth_proottib = tibble(droot_df) %>% 
+  mutate(predictor = rownames(droot_df)) %>% 
+  rename(est_droot = 1) %>% 
+  rename(sig_droot = 4) %>% 
+  mutate(sig_droot = sig_droot < 0.05)%>% 
+  dplyr::select(1,4,5)
+
+p_dshootsum = summary(growth_pshoot)
+dshoot_df = data.frame(p_dshootsum$coefficients)
+growth_pshoottib = tibble(dshoot_df) %>% 
+  mutate(predictor = rownames(dshoot_df)) %>% 
+  rename(est_dshoot = 1) %>% 
+  rename(sig_dshoot = 4) %>% 
+  mutate(sig_dshoot = sig_dshoot < 0.05)%>% 
+  dplyr::select(1,4,5)
+
+p_drssum = summary(growth_prs)
+drs_df = data.frame(p_drssum$coefficients)
+growth_prstib = tibble(drs_df) %>% 
+  mutate(predictor = rownames(drs_df)) %>% 
+  rename(est_drs = 1) %>% 
+  rename(sig_drs = 4) %>% 
+  mutate(sig_drs = sig_drs < 0.05)%>% 
+  dplyr::select(1,4,5)
+
+growth_table = growth_proottib %>% left_join(growth_pshoottib) %>% left_join(growth_prstib) %>% 
+  relocate(predictor) %>% 
+  rename("Growth root" = est_droot, "Growth shoot" = est_dshoot,"Growth R:S" = est_drs,)
+
+
+kable(growth_table %>% dplyr::select(1,2,4,6))  %>%
+  column_spec(2, bold = ifelse(growth_table$sig_droot == T, TRUE, FALSE))%>%
+  column_spec(3, bold = ifelse(growth_table$sig_dshoot == T, TRUE, FALSE))%>%
+  column_spec(4, bold = ifelse(growth_table$sig_drs == T, TRUE, FALSE)) %>%
+  kable_styling() %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+``` 
+
+```{r}
+harvest_proot = lm(h_root~soil_type+neighb_sp+neighb_st+treatment, 
+                   data = std_mass %>% filter(seedling_sp == "P"))
+harvest_pshoot = lm(h_shoot~soil_type+neighb_sp+neighb_st+treatment, 
+                    data = std_mass %>% filter(seedling_sp == "P"))
+harvest_prs = lm(h_rs~soil_type+neighb_sp+neighb_st+treatment, 
+                 data = std_mass %>% filter(seedling_sp == "P"))
+
+p_hrootsum = summary(harvest_proot)
+hroot_df = data.frame(p_hrootsum$coefficients)
+harvest_proottib = tibble(hroot_df) %>% 
+  mutate(predictor = rownames(hroot_df)) %>% 
+  rename(est_hroot = 1) %>% 
+  rename(sig_hroot = 4) %>% 
+  mutate(sig_hroot = sig_hroot < 0.05)%>% 
+  dplyr::select(1,4,5)
+
+p_hshootsum = summary(harvest_pshoot)
+hshoot_df = data.frame(p_hshootsum$coefficients)
+harvest_pshoottib = tibble(hshoot_df) %>% 
+  mutate(predictor = rownames(hshoot_df)) %>% 
+  rename(est_hshoot = 1) %>% 
+  rename(sig_hshoot = 4) %>% 
+  mutate(sig_hshoot = sig_hshoot < 0.05)%>% 
+  dplyr::select(1,4,5)
+
+p_hrssum = summary(harvest_prs)
+hrs_df = data.frame(p_hrssum$coefficients)
+harvest_prstib = tibble(hrs_df) %>% 
+  mutate(predictor = rownames(hrs_df)) %>% 
+  rename(est_hrs = 1) %>% 
+  rename(sig_hrs = 4) %>% 
+  mutate(sig_hrs = sig_hrs < 0.05)%>% 
+  dplyr::select(1,4,5)
+
+harvest_table = harvest_proottib %>% left_join(harvest_pshoottib) %>% left_join(harvest_prstib) %>% 
+  relocate(predictor) %>% 
+  rename("Harvest root" = est_hroot, "Harvest shoot" = est_hshoot,"Harvest R:S" = est_hrs,)
+
+
+kable(harvest_table %>% dplyr::select(1,2,4,6))  %>%
+  column_spec(2, bold = ifelse(harvest_table$sig_hroot == T, TRUE, FALSE))%>%
+  column_spec(3, bold = ifelse(harvest_table$sig_hshoot == T, TRUE, FALSE))%>%
+  column_spec(4, bold = ifelse(harvest_table$sig_hrs == T, TRUE, FALSE)) %>%
+  kable_styling() %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+``` 
+BIGCONE TOTAL TABLE
+```{r}
+tot_table = harvest_table %>% 
+  left_join(repot_table) %>% 
+  left_join(growth_table) %>% 
+  mutate(sig_rroot = case_when(
+    is.na(sig_rroot)~ F, .default = sig_rroot))%>% 
+  mutate(sig_rshoot = case_when(
+    is.na(sig_rshoot)~ F, .default = sig_rshoot))%>% 
+  mutate(sig_rrs = case_when(
+    is.na(sig_rrs)~ F, .default = sig_rrs)) %>% 
+  mutate(predictor = case_when(
+    predictor == "soil_typeP" ~ "Bigcone soil",
+    predictor == "soil_typeQ" ~ "Oak soil",
+    predictor == "neighb_spQ" ~ "Oak neighbor",
+    predictor == "neighb_stQ" ~ "Neighbor soil oak",
+    predictor == "neighb_stP" ~ "Neighbor soil bigcone",
+    predictor == "treatmentD" ~ "Drought",
+    .default = predictor
+  ))%>%
+  mutate(across(where(is.numeric), round, digits = 2))
+  
+tot_table_reorder = tot_table[,c(1,8:19, 2:7)] 
+
+kable(tot_table_reorder %>% dplyr::select(1,2,4,6,8,10,12, 14, 16, 18))  %>%
+  column_spec(2, bold = ifelse(tot_table_reorder$sig_rroot == T, TRUE, FALSE))%>%
+  column_spec(3, bold = ifelse(tot_table_reorder$sig_rshoot == T, TRUE, FALSE))%>%
+  column_spec(4, bold = ifelse(tot_table_reorder$sig_rrs == T, TRUE, FALSE)) %>%
+  column_spec(5, bold = ifelse(tot_table_reorder$sig_droot == T, TRUE, FALSE))%>%
+  column_spec(6, bold = ifelse(tot_table_reorder$sig_dshoot == T, TRUE, FALSE))%>%
+  column_spec(7, bold = ifelse(tot_table_reorder$sig_drs == T, TRUE, FALSE))%>%
+  column_spec(8, bold = ifelse(tot_table_reorder$sig_hroot == T, TRUE, FALSE))%>%
+  column_spec(9, bold = ifelse(tot_table_reorder$sig_hshoot == T, TRUE, FALSE))%>%
+  column_spec(10, bold = ifelse(tot_table_reorder$sig_hrs == T, TRUE, FALSE)) %>%
+  kable_styling() %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+tot_table_reorder = tot_table[,c(1,8:19, 2:7)] %>% 
+        filter(predictor != "(Intercept)") 
+
+kcol_names = c("","Repot root","Repot shoot","Repot R:S","Growth root","Growth shoot",
+               "Growth R:S","Harvest root","Harvest shoot","Harvest R:S")
+
+kable(tot_table_reorder %>% dplyr::select(1,2,4,6,8,10,12, 14, 16, 18), col.names =kcol_names, 
+      align = c("r", "r","r", "r","r", "r","r", "r","r", "r") )  %>%
+  column_spec(2, bold = ifelse(tot_table_reorder$sig_rroot == T, TRUE, FALSE))%>%
+  column_spec(3, bold = ifelse(tot_table_reorder$sig_rshoot == T, TRUE, FALSE))%>%
+  column_spec(4, bold = ifelse(tot_table_reorder$sig_rrs == T, TRUE, FALSE)) %>%
+  column_spec(5, bold = ifelse(tot_table_reorder$sig_droot == T, TRUE, FALSE))%>%
+  column_spec(6, bold = ifelse(tot_table_reorder$sig_dshoot == T, TRUE, FALSE))%>%
+  column_spec(7, bold = ifelse(tot_table_reorder$sig_drs == T, TRUE, FALSE))%>%
+  column_spec(8, bold = ifelse(tot_table_reorder$sig_hroot == T, TRUE, FALSE))%>%
+  column_spec(9, bold = ifelse(tot_table_reorder$sig_hshoot == T, TRUE, FALSE))%>%
+  column_spec(10, bold = ifelse(tot_table_reorder$sig_hrs == T, TRUE, FALSE)) %>%
+  kable_styling() %>% 
+  kable_classic(full_width = F, html_font = "Cambria")
+  # %>%
+  # kable_minimal()
+
+kable(tot_table_reorder %>% dplyr::select(1,2,4,6,8,10,12, 14, 16, 18) %>% 
+        filter(predictor %in%c("Bigcone soil", "Oak soil")), 
+      col.names =kcol_names, 
+      align = c("r", "r","r", "r","r", "r","r", "r","r", "r") )  %>%
+  column_spec(2, bold = ifelse(tot_table_reorder$sig_rroot == T, TRUE, FALSE))%>%
+  column_spec(3, bold = ifelse(tot_table_reorder$sig_rshoot == T, TRUE, FALSE))%>%
+  column_spec(4, bold = ifelse(tot_table_reorder$sig_rrs == T, TRUE, FALSE)) %>%
+  column_spec(5, bold = ifelse(tot_table_reorder$sig_droot == T, TRUE, FALSE))%>%
+  column_spec(6, bold = ifelse(tot_table_reorder$sig_dshoot == T, TRUE, FALSE))%>%
+  column_spec(7, bold = ifelse(tot_table_reorder$sig_drs == T, TRUE, FALSE))%>%
+  column_spec(8, bold = ifelse(tot_table_reorder$sig_hroot == T, TRUE, FALSE))%>%
+  column_spec(9, bold = ifelse(tot_table_reorder$sig_hshoot == T, TRUE, FALSE))%>%
+  column_spec(10, bold = ifelse(tot_table_reorder$sig_hrs == T, TRUE, FALSE)) %>%
+  kable_styling() %>% 
+  kable_classic(full_width = F, html_font = "Cambria")
+
+kcol_names_norepot = c("","Growth root","Growth shoot",
+               "Growth R:S","Harvest root","Harvest shoot","Harvest R:S")
+
+kable(tot_table_reorder %>% dplyr::select(1,8,10,12,14,16,18) %>% 
+        filter(!predictor %in%c("Bigcone soil", "Oak soil")), 
+      col.names =element_blank(), 
+      align = c("r","r", "r","r", "r","r", "r") ) %>%
+  column_spec(2, bold = ifelse(tot_table_reorder$sig_droot == T, TRUE, FALSE))%>%
+  column_spec(3, bold = ifelse(tot_table_reorder$sig_dshoot == T, TRUE, FALSE))%>%
+  column_spec(4, bold = ifelse(tot_table_reorder$sig_drs == T, TRUE, FALSE))%>%
+  column_spec(5, bold = ifelse(tot_table_reorder$sig_hroot == T, TRUE, FALSE))%>%
+  column_spec(6, bold = ifelse(tot_table_reorder$sig_hshoot == T, TRUE, FALSE))%>%
+  column_spec(7, bold = ifelse(tot_table_reorder$sig_hrs == T, TRUE, FALSE)) %>%
+  kable_styling() %>% 
+  kable_classic(full_width = F, html_font = "Cambria")
+```
+
+
+```{r}
+std_mass = masschange %>% 
+  filter(seedling_id %in% living$seedling_id) %>% 
+  group_by(seedling_sp) %>% 
+  drop_na() %>% 
+  mutate(r_total = r_root+r_shoot) %>% 
+  mutate(h_total = h_root+h_shoot)%>%  
+  mutate(r_rs = r_root/r_shoot)%>%  
+  mutate(d_rs = d_root/d_shoot)%>% 
+  mutate(h_rs = h_root/h_shoot)%>% 
+  mutate(r_rs = (r_rs-mean(r_rs))/sd(r_rs))%>% 
+  mutate(d_rs = (d_rs-mean(d_rs))/sd(d_rs))%>% 
+  mutate(h_rs = (h_rs-mean(h_rs))/sd(h_rs))%>%  
+  mutate(h_total = (h_total-mean(h_total))/sd(h_total))%>%  
+  mutate(r_total = (r_total-mean(r_total))/sd(r_total))%>% 
+  mutate(r_shoot = (r_shoot-mean(r_shoot))/sd(r_shoot))%>% 
+  mutate(r_root = (r_root-mean(r_root))/sd(r_root))%>% 
+  mutate(h_shoot = (h_shoot-mean(h_shoot))/sd(h_shoot))%>% 
+  mutate(h_root = (h_root-mean(h_root))/sd(h_root))%>% 
+  mutate(d_root = (d_root-mean(d_root))/sd(d_root))%>% 
+  mutate(d_shoot = (d_shoot-mean(d_shoot))/sd(d_shoot))%>% 
+  mutate(d_total = (d_total-mean(d_total))/sd(d_total))
+
+repot_proot = lm(r_root~soil_type, data = std_mass %>% filter(seedling_sp == "Q"))
+repot_pshoot = lm(r_shoot~soil_type, data = std_mass %>% filter(seedling_sp == "Q"))
+repot_prs = lm(r_rs~soil_type, data = std_mass %>% filter(seedling_sp == "Q"))
+
+p_rrootsum = summary(repot_proot)
+rroot_df = data.frame(p_rrootsum$coefficients)
+repot_proottib = tibble(rroot_df) %>% 
+  mutate(predictor = rownames(rroot_df)) %>% 
+  rename(est_rroot = 1) %>% 
+  rename(sig_rroot = 4) %>% 
+  mutate(sig_rroot = sig_rroot < 0.05)%>% 
+  dplyr::select(1,4,5)
+
+p_rshootsum = summary(repot_pshoot)
+rshoot_df = data.frame(p_rshootsum$coefficients)
+repot_pshoottib = tibble(rshoot_df) %>% 
+  mutate(predictor = rownames(rshoot_df)) %>% 
+  rename(est_rshoot = 1) %>% 
+  rename(sig_rshoot = 4) %>% 
+  mutate(sig_rshoot = sig_rshoot < 0.05)%>% 
+  dplyr::select(1,4,5)
+
+p_rrssum = summary(repot_prs)
+rrs_df = data.frame(p_rrssum$coefficients)
+repot_prstib = tibble(rrs_df) %>% 
+  mutate(predictor = rownames(rrs_df)) %>% 
+  rename(est_rrs = 1) %>% 
+  rename(sig_rrs = 4) %>% 
+  mutate(sig_rrs = sig_rrs < 0.05)%>% 
+  dplyr::select(1,4,5)
+
+repot_table = repot_proottib %>% left_join(repot_pshoottib) %>% left_join(repot_prstib) %>% 
+  relocate(predictor) %>% 
+  rename("Repot root" = est_rroot, "Repot shoot" = est_rshoot,"Repot R:S" = est_rrs)
+
+
+
+kable(repot_table %>% dplyr::select(1,2,4,6))  %>%
+  column_spec(2, bold = ifelse(repot_table$sig_rroot == T, TRUE, FALSE))%>%
+  column_spec(3, bold = ifelse(repot_table$sig_rshoot == T, TRUE, FALSE))%>%
+  column_spec(4, bold = ifelse(repot_table$sig_rrs == T, TRUE, FALSE)) %>%
+  kable_styling() %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+  
+```
+```{r}
+growth_proot = lm(d_root~soil_type+neighb_sp+neighb_st+treatment, 
+                   data = std_mass %>% filter(seedling_sp == "Q"))
+growth_pshoot = lm(d_shoot~soil_type+neighb_sp+neighb_st+treatment, 
+                    data = std_mass %>% filter(seedling_sp == "Q"))
+growth_prs = lm(d_rs~soil_type+neighb_sp+neighb_st+treatment, 
+                 data = std_mass %>% filter(seedling_sp == "Q"))
+
+p_drootsum = summary(growth_proot)
+droot_df = data.frame(p_drootsum$coefficients)
+growth_proottib = tibble(droot_df) %>% 
+  mutate(predictor = rownames(droot_df)) %>% 
+  rename(est_droot = 1) %>% 
+  rename(sig_droot = 4) %>% 
+  mutate(sig_droot = sig_droot < 0.05)%>% 
+  dplyr::select(1,4,5)
+
+p_dshootsum = summary(growth_pshoot)
+dshoot_df = data.frame(p_dshootsum$coefficients)
+growth_pshoottib = tibble(dshoot_df) %>% 
+  mutate(predictor = rownames(dshoot_df)) %>% 
+  rename(est_dshoot = 1) %>% 
+  rename(sig_dshoot = 4) %>% 
+  mutate(sig_dshoot = sig_dshoot < 0.05)%>% 
+  dplyr::select(1,4,5)
+
+p_drssum = summary(growth_prs)
+drs_df = data.frame(p_drssum$coefficients)
+growth_prstib = tibble(drs_df) %>% 
+  mutate(predictor = rownames(drs_df)) %>% 
+  rename(est_drs = 1) %>% 
+  rename(sig_drs = 4) %>% 
+  mutate(sig_drs = sig_drs < 0.05)%>% 
+  dplyr::select(1,4,5)
+
+growth_table = growth_proottib %>% left_join(growth_pshoottib) %>% left_join(growth_prstib) %>% 
+  relocate(predictor) %>% 
+  rename("Growth root" = est_droot, "Growth shoot" = est_dshoot,"Growth R:S" = est_drs,)
+
+
+kable(growth_table %>% dplyr::select(1,2,4,6))  %>%
+  column_spec(2, bold = ifelse(growth_table$sig_droot == T, TRUE, FALSE))%>%
+  column_spec(3, bold = ifelse(growth_table$sig_dshoot == T, TRUE, FALSE))%>%
+  column_spec(4, bold = ifelse(growth_table$sig_drs == T, TRUE, FALSE)) %>%
+  kable_styling() %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+``` 
+
+```{r}
+harvest_proot = lm(h_root~soil_type+neighb_sp+neighb_st+treatment, 
+                   data = std_mass %>% filter(seedling_sp == "Q"))
+harvest_pshoot = lm(h_shoot~soil_type+neighb_sp+neighb_st+treatment, 
+                    data = std_mass %>% filter(seedling_sp == "Q"))
+harvest_prs = lm(h_rs~soil_type+neighb_sp+neighb_st+treatment, 
+                 data = std_mass %>% filter(seedling_sp == "Q"))
+
+p_hrootsum = summary(harvest_proot)
+hroot_df = data.frame(p_hrootsum$coefficients)
+harvest_proottib = tibble(hroot_df) %>% 
+  mutate(predictor = rownames(hroot_df)) %>% 
+  rename(est_hroot = 1) %>% 
+  rename(sig_hroot = 4) %>% 
+  mutate(sig_hroot = sig_hroot < 0.05)%>% 
+  dplyr::select(1,4,5)
+
+p_hshootsum = summary(harvest_pshoot)
+hshoot_df = data.frame(p_hshootsum$coefficients)
+harvest_pshoottib = tibble(hshoot_df) %>% 
+  mutate(predictor = rownames(hshoot_df)) %>% 
+  rename(est_hshoot = 1) %>% 
+  rename(sig_hshoot = 4) %>% 
+  mutate(sig_hshoot = sig_hshoot < 0.05)%>% 
+  dplyr::select(1,4,5)
+
+p_hrssum = summary(harvest_prs)
+hrs_df = data.frame(p_hrssum$coefficients)
+harvest_prstib = tibble(hrs_df) %>% 
+  mutate(predictor = rownames(hrs_df)) %>% 
+  rename(est_hrs = 1) %>% 
+  rename(sig_hrs = 4) %>% 
+  mutate(sig_hrs = sig_hrs < 0.05)%>% 
+  dplyr::select(1,4,5)
+
+harvest_table = harvest_proottib %>% left_join(harvest_pshoottib) %>% left_join(harvest_prstib) %>% 
+  relocate(predictor) %>% 
+  rename("Harvest root" = est_hroot, "Harvest shoot" = est_hshoot,"Harvest R:S" = est_hrs,)
+
+
+kable(harvest_table %>% dplyr::select(1,2,4,6))  %>%
+  column_spec(2, bold = ifelse(harvest_table$sig_hroot == T, TRUE, FALSE))%>%
+  column_spec(3, bold = ifelse(harvest_table$sig_hshoot == T, TRUE, FALSE))%>%
+  column_spec(4, bold = ifelse(harvest_table$sig_hrs == T, TRUE, FALSE)) %>%
+  kable_styling() %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+``` 
+
+```{r}
+tot_table = harvest_table %>% 
+  left_join(repot_table) %>% 
+  left_join(growth_table) %>% 
+  mutate(sig_rroot = case_when(
+    is.na(sig_rroot)~ F, .default = sig_rroot))%>% 
+  mutate(sig_rshoot = case_when(
+    is.na(sig_rshoot)~ F, .default = sig_rshoot))%>% 
+  mutate(sig_rrs = case_when(
+    is.na(sig_rrs)~ F, .default = sig_rrs)) %>% 
+  mutate(predictor = case_when(
+    predictor == "soil_typeP" ~ "Bigcone soil",
+    predictor == "soil_typeQ" ~ "Oak soil",
+    predictor == "neighb_spQ" ~ "Oak neighbor",
+    predictor == "neighb_stQ" ~ "Neighbor soil oak",
+    predictor == "neighb_stC" ~ "Neighbor soil sterile",
+    predictor == "treatmentD" ~ "Drought",
+    .default = predictor
+  ))%>%
+  mutate(across(where(is.numeric), round, digits = 2))
+  
+tot_table_reorder = tot_table[,c(1,8:19, 2:7)] 
+
+kable(tot_table_reorder %>% dplyr::select(1,2,4,6,8,10,12, 14, 16, 18))  %>%
+  column_spec(2, bold = ifelse(tot_table_reorder$sig_rroot == T, TRUE, FALSE))%>%
+  column_spec(3, bold = ifelse(tot_table_reorder$sig_rshoot == T, TRUE, FALSE))%>%
+  column_spec(4, bold = ifelse(tot_table_reorder$sig_rrs == T, TRUE, FALSE)) %>%
+  column_spec(5, bold = ifelse(tot_table_reorder$sig_droot == T, TRUE, FALSE))%>%
+  column_spec(6, bold = ifelse(tot_table_reorder$sig_dshoot == T, TRUE, FALSE))%>%
+  column_spec(7, bold = ifelse(tot_table_reorder$sig_drs == T, TRUE, FALSE))%>%
+  column_spec(8, bold = ifelse(tot_table_reorder$sig_hroot == T, TRUE, FALSE))%>%
+  column_spec(9, bold = ifelse(tot_table_reorder$sig_hshoot == T, TRUE, FALSE))%>%
+  column_spec(10, bold = ifelse(tot_table_reorder$sig_hrs == T, TRUE, FALSE)) %>%
+  kable_styling() %>%
+  kable_classic(full_width = F, html_font = "Cambria")
+
+tot_table_reorder = tot_table[,c(1,8:19, 2:7)] %>% 
+        filter(predictor != "(Intercept)")
+
+kcol_names = c("","Repot root","Repot shoot","Repot R:S","Growth root","Growth shoot",
+               "Growth R:S","Harvest root","Harvest shoot","Harvest R:S")
+
+kable(tot_table_reorder %>% dplyr::select(1,2,4,6,8,10,12, 14, 16, 18), col.names =kcol_names )  %>%
+  column_spec(2, bold = ifelse(tot_table_reorder$sig_rroot == T, TRUE, FALSE))%>%
+  column_spec(3, bold = ifelse(tot_table_reorder$sig_rshoot == T, TRUE, FALSE))%>%
+  column_spec(4, bold = ifelse(tot_table_reorder$sig_rrs == T, TRUE, FALSE)) %>%
+  column_spec(5, bold = ifelse(tot_table_reorder$sig_droot == T, TRUE, FALSE))%>%
+  column_spec(6, bold = ifelse(tot_table_reorder$sig_dshoot == T, TRUE, FALSE))%>%
+  column_spec(7, bold = ifelse(tot_table_reorder$sig_drs == T, TRUE, FALSE))%>%
+  column_spec(8, bold = ifelse(tot_table_reorder$sig_hroot == T, TRUE, FALSE))%>%
+  column_spec(9, bold = ifelse(tot_table_reorder$sig_hshoot == T, TRUE, FALSE))%>%
+  column_spec(10, bold = ifelse(tot_table_reorder$sig_hrs == T, TRUE, FALSE)) %>%
+  kable_styling() %>% 
+  kable_classic(full_width = F, html_font = "Cambria")
+  # %>%
+  # kable_minimal()
+```
+
+
+
+
+
+
+
+
+```{r}
+
+
+
+
+drt = masschange  %>% 
+  filter(seedling_id %in% living$seedling_id) %>% 
+  drop_na() %>% 
+  filter(seedling_sp == "P")%>% 
+  mutate(r_total = r_root+r_shoot) %>% 
+  mutate(h_total = h_root+h_shoot)%>%  
+  mutate(r_rs = r_root/r_shoot)%>%  
+  mutate(d_rs = d_root/d_shoot)%>% 
+  mutate(h_rs = h_root/h_shoot)
+
+phealth = health %>% 
+  group_by(seedling_id) %>% 
+  summarize(ndvi = mean(mean_ndvi))
+
+dh = drt %>% 
+  left_join(phealth)
+
+anova = aov(aov(ndvi~soil_type*treatment, data = dh))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$`soil_type:treatment`)
+  htib = tibble(str = rownames(dfx),
+                soil_type = str_sub(str, 1,1),
+                treatment = str_sub(str, 3,3),
+                letters = dfx$Letters) %>% 
+    dplyr::select(-str)
+  
+dh_let = dh %>%  left_join(htib)%>% 
+  group_by(soil_type, treatment) %>% 
+  mutate(lab_y = quantile(ndvi, probs = 0.75, na.rm = T)+IQR(ndvi, na.rm = T)*1.75)
+
+
+
+ggplot(drt, aes(x = soil_type, y = d_root, color = treatment, fill = soil_type))+
+  geom_boxplot()+gg_soilfill+gg_droughtcolor
+
+ggplot(drt, aes(x = soil_type, y = d_shoot, color = treatment, fill = soil_type))+
+  geom_boxplot()+gg_soilfill+gg_droughtcolor
+
+ggplot(drt, aes(x = soil_type, y = d_total, color = treatment, fill = soil_type))+
+  geom_boxplot()+gg_soilfill+gg_droughtcolor
+
+ggplot(drt, aes(x = soil_type, y = log(d_rs), color = treatment, fill = soil_type))+
+  geom_boxplot()+gg_soilfill+gg_droughtcolor
+
+ggplot(dh, aes(x = soil_type, y = ndvi, color = treatment, fill = soil_type))+
+  geom_boxplot(alpha = 0.75)+gg_soilfill+gg_droughtcolor
+
+ggplot(dh, aes(x = soil_type, y = ndvi, color = neighb_sp, fill = soil_type))+
+  geom_boxplot(alpha = 0.75)+gg_soilfill+gg_nspcolor+facet_wrap(~treatment)
+
+ggplot(dh_let, aes(x = soil_type, y = ndvi, color = treatment, fill = soil_type))+
+  geom_boxplot(alpha = 0.75)+gg_soilfill+gg_droughtcolor+
+    geom_text(aes(x = soil_type, y = lab_y, label = letters), size = 5, 
+              position = position_dodge(width = 0.75))
+
+ggplot(dh_let, aes(x = treatment, y = ndvi, color = treatment))+
+  geom_boxplot(alpha = 0.75)+gg_droughtcolor
+
+TukeyHSD(aov(ndvi~soil_type*treatment, data = dh))
+```
+
+
+

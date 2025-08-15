@@ -1,0 +1,1566 @@
+---
+title: "Week of Feb 21, 2024"
+author: "Gabe Runte"
+date: "2024-02-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(here)
+library(lubridate)
+library(janitor)
+library(RColorBrewer)
+library(multcompView)
+library(kableExtra)
+library(tidyverse)
+library(patchwork)
+source(here("src", "colors.R"))
+```
+
+# Datasets
+```{r, message = F, warning = F}
+measure = read_csv(here("data", "analysis/size_master.csv"))
+harvest = read_csv(here("data", "analysis/harvest_metrics.csv")) 
+health = read_csv(here("data", "analysis/ndvi_data.csv"))
+harvest_tips = read_csv(here("data", "analysis/harvest_roottips - all.csv"))
+repot_tips = read_csv(here("data", "repotting/ghecto_repotting_root_pulling_data.csv"))
+repot_mass = read_csv(here("data", "repotting", "repotting_drymass_fitted.csv"))
+harvest_mass = read_csv(here("data", "harvest", "harvest_biomass_wideclean.csv"))
+image_data = read_csv(here("data", "wide_final_seedling_area.csv")) %>% 
+  mutate(foliar = foliar+midday_foliar+predawn_foliar) %>% select(-midday_foliar, -predawn_foliar)
+neighb_pairs = read_csv(here("data", "design", "ghecto_neighbor_pairs.csv"))
+trt = read_csv(here("data", "design", "seedling_treatments.csv"))
+drought = read_csv(here("data", "design", "drought_assignments_bypot.csv")) %>% 
+  select(1,3)
+harvest_comm = read_csv( here("data", "harvest", "harvest_community_matrix_scaled.csv"))
+
+pressure = read_csv(here("data/harvest", "pressure_bomb - Sheet1.csv")) %>% 
+  select(1:4) %>%  mutate(time = tolower(time))
+sapwood = read_csv(here("data/harvest", "harvest_sapwood.csv"))
+```
+
+```{r, message = F, include = F, warning = F}
+colonization = repot_tips %>% 
+  mutate(repot_col = colonization_numerator/colonization_denominator) %>% 
+  select(seedling_id, repot_col) %>% 
+  left_join(harvest_tips %>% mutate(harvest_col = colonized/(colonized+uncolonized)) %>% 
+              select(seedling_id, harvest_col) %>% 
+              mutate(seedling_id = as.numeric(seedling_id)))
+
+drought_treat = health %>% 
+  select(seedling_id, treatment) %>% distinct()
+
+total_treat = measure %>% 
+  select(seedling_id, seedling_sp, soil_type, neighbor, neighb_sp, neighb_st, pot) %>% distinct() %>% drop_na() %>% 
+  left_join(drought_treat)%>%
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  ))%>%
+  mutate(st_long = case_when(
+    soil_type == "P" ~ "Bigcone soil",
+    soil_type == "Q" ~ "Oak soil",
+    soil_type == "C" ~ "Control soil"
+  ))%>%
+  mutate(nst_long = case_when(
+    neighb_st == "P" ~ "Neighbor Bigcone soil",
+    neighb_st == "Q" ~ "Neighbor Oak soil",
+    neighb_st == "C" ~ "Neighbor Control soil"
+  ))%>%
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone",
+    seedling_sp == "Q" ~ "Oak"
+  )) %>%
+  mutate(nsp_long = case_when(
+    neighb_sp == "P" ~ "Neighbor Bigcone",
+    neighb_sp == "Q" ~ "Neighbor Oak"
+  ))%>% 
+  mutate(neighb_st = fct_relevel(neighb_st, "P", "Q","C"))%>% 
+  mutate(soil_type = fct_relevel(soil_type, "P", "Q", "C"))%>% 
+  mutate(nst_long = fct_relevel(nst_long, "Neighbor Bigcone soil", "Neighbor Oak soil", "Neighbor Control soil"))%>%
+  mutate(st_long = fct_relevel(st_long, "Bigcone soil", "Oak soil", "Control soil"))%>%
+  mutate(st_longish = case_when(
+    soil_type == "P" ~ "Bigcone",
+    soil_type == "Q" ~ "Oak",
+    soil_type == "C" ~ "Sterile"
+  ))
+
+# image_df = image_data %>% left_join(total_treat) %>% 
+#   mutate(total_foliar = foliar+predawn_foliar+midday_foliar) %>% 
+#   left_join(drought_treat)
+
+sort_string_chars <- function(s) {
+  paste(sort(unlist(strsplit(s, ""))), collapse = "")
+}
+
+pot_df = neighb_pairs %>% 
+  rename(seedling_id = seedling_1) %>% 
+  left_join(trt) %>% 
+  rename(sp1 = seedling_sp, st1 = soil_type) %>% 
+  select(!seedling_id) %>% 
+  rename(seedling_id = seedling_2) %>% 
+  left_join(trt)%>% 
+  rename(sp2 = seedling_sp, st2 = soil_type) %>% 
+  mutate(spp = paste0(sp1, sp2))%>% 
+  mutate(stt = paste0(st1, st2)) %>% 
+  select(pot, spp, stt) %>% 
+  mutate(spp = map_chr(spp, sort_string_chars)) %>% #alphabetize the combo to minimize different uniques
+  mutate(stt = map_chr(stt, sort_string_chars)) %>% 
+  left_join(drought)
+
+masschange = repot_mass %>% 
+  rename(r_root = below_dry, r_shoot = above_dry) %>% 
+  left_join(harvest_mass %>% 
+              mutate(shoot = shoot+foliar) %>% 
+              select(-foliar) %>% 
+              rename(h_shoot = shoot, h_root = root)) %>% 
+  mutate(d_root = h_root/r_root, d_shoot = h_shoot/r_shoot, d_total = (h_root+h_shoot)/(r_root+r_shoot)) %>% 
+  left_join(total_treat)
+
+living = measure %>% 
+  filter(date == "2022-04-01") %>% 
+  filter(alive ==1) %>% 
+  select(seedling_id)
+```
+
+
+# Analysis
+
+
+### Looking at the growth of paired seedlings based on neighbor and neighbor soil
+```{r, message = F, include = F, warning = F}
+pair_grow = measure %>% 
+  select(1:7)%>% 
+  mutate(date = ymd(date)) %>% 
+  filter(date > "2021-03-01" & date <"2022-05-01")%>% 
+  mutate(month = month(date)) %>% 
+  filter(month == 4) %>%
+  select(seedling_id, date, height_cm) %>% #Just looking at right after repotting to one year later
+  pivot_wider(names_from = date, values_from = height_cm) %>% 
+  rename(yr1 = 3, yr2 = 2) %>% 
+  mutate(growth = yr2/yr1) %>%  select(seedling_id, growth) %>% 
+  left_join(total_treat)%>% 
+  filter(!(seedling_sp == "P" & neighb_sp == "Q" & neighb_st == "C")) %>% 
+  mutate(st_long = fct_relevel(st_long, "Bigcone soil", "Oak soil", "Control soil")) %>% 
+  filter(!(seedling_sp == "Q" & neighb_sp == "P" & soil_type == "C"))%>% 
+  mutate(nst_long = fct_relevel(nst_long, "Neighbor Bigcone soil", "Neighbor Oak soil", "Neighbor Control soil"))%>%
+  mutate(st_long = fct_relevel(st_long, "Bigcone soil", "Oak soil", "Control soil"))%>% 
+  mutate(neighb_st = fct_relevel(neighb_st, "P", "Q", "C"))
+
+```
+
+```{r, message = F, warning = F, echo = F}
+
+p_pair_grow_tuk = pair_grow %>%  filter(seedling_sp == "P") %>% 
+  select(soil_type, neighb_sp) %>% 
+  distinct()
+
+for(i in 1:nrow(p_pair_grow_tuk)){
+  st = p_pair_grow_tuk$soil_type[i]
+  nsp = p_pair_grow_tuk$neighb_sp[i]
+  
+  anova = aov(aov(growth~neighb_st, data = pair_grow %>%  filter(seedling_sp == "P") %>% 
+               filter(soil_type == st & neighb_sp == nsp)))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$neighb_st)
+  htib = tibble(neighb_st = rownames(dfx),
+                letters = dfx$Letters,
+                soil_type = st,
+                neighb_sp = nsp)
+  
+  if(i == 1){p_letters = htib}
+  else{p_letters = p_letters %>% bind_rows(htib)}
+}
+
+
+
+p_pairedgrowth_let = pair_grow %>%  left_join(p_letters)
+
+p_pairedgrowth_plot=  ggplot(p_pairedgrowth_let %>%  filter(seedling_sp == "P"),
+         aes(x = neighb_st, y = sqrt(growth), fill = neighb_st))+ geom_boxplot(outlier.shape = NA)+
+  facet_grid(nsp_long~st_long)+gg_nsoilfill+theme_minimal()+
+  theme(axis.text.x = element_blank())+
+  labs(title = "Bigcone paired pot growth (Tukey results are within-panel)", x = "Neighbor Soil", y = "Growth in cm (t2//t1)")+ theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))+
+  theme(plot.background = element_rect( linewidth = .3))+ 
+    geom_text(aes(x = neighb_st, y = 2.25, label = letters), size = 2.5)
+
+p_pairedgrowth_plot
+
+#TukeyHSD(aov(growth~soil_type*neighb_sp*neighb_st, data = pair_grow %>%  filter(seedling_sp == "P")))
+
+```
+
+```{r, message = F, warning = F, echo = F, eval = F}
+
+  anova = aov(aov(growth~neighb_st*neighb_sp*soil_type, data = pair_grow %>%  filter(seedling_sp == "P")))
+  tuk = TukeyHSD(anova)
+  tuk$`neighb_st:neighb_sp`[!complete.cases(tuk$`neighb_st:neighb_sp`),] <- 0
+  tuk$`neighb_sp:soil_type`[!complete.cases(tuk$`neighb_sp:soil_type`),] <- 0
+  tuk$`neighb_st:neighb_sp:soil_type`[!complete.cases(tuk$`neighb_st:neighb_sp:soil_type`),] <- 0
+
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$`neighb_st:neighb_sp:soil_type`)
+  htib = tibble(nst_nsp_st = rownames(dfx),
+                letters = dfx$Letters,
+                soil_type = str_sub(nst_nsp_st, 5,5),
+                neighb_sp = str_sub(nst_nsp_st, 3,3),
+                neighb_st = str_sub(nst_nsp_st, 1,1))
+
+
+
+p_pairedgrowth_let = pair_grow %>%  left_join(htib)%>% 
+  mutate(neighb_st = fct_relevel(neighb_st, "P", "Q", "C")) %>% 
+  mutate(nn = paste0(neighb_sp, neighb_st))
+
+
+
+p_pairedgrowth_plot=  ggplot(p_pairedgrowth_let %>%  filter(seedling_sp == "P"),
+         aes(x = neighb_st, y = sqrt(growth), fill = neighb_st,color = neighb_sp))+ 
+  geom_point(position = position_jitterdodge(jitter.width = 0.125),shape = 21, stroke = 0, alpha= 0.8)+
+  geom_boxplot(outlier.shape = NA, alpha = 0.8)+
+  facet_grid(~st_long)+gg_nsoilfill+gg_nspcolord+
+  theme_minimal()+
+  theme(axis.text.x = element_blank())+
+  labs(title = "Bigcone paired pot growth", x = "Neighbor Soil", y = "Growth in cm (t2//t1)")+ theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))+
+  theme(plot.background = element_rect( linewidth = .3))+    
+  geom_text(aes(x = neighb_st, y = 2.25, label = letters, col = neighb_sp), 
+            size = 5, position = position_dodge(width = 0.75))
+
+
+TukeyHSD(aov(growth~soil_type*neighb_st*neighb_sp, data = p_pairedgrowth_let %>%  filter(seedling_sp == "P")))
+TukeyHSD(aov(growth~soil_type*neighb_st*neighb_sp, data = p_pairedgrowth_let %>%  filter(seedling_sp == "P") %>% 
+               filter(soil_type != "C")))
+TukeyHSD(aov(growth~soil_type*neighb_st, data = p_pairedgrowth_let %>%  filter(seedling_sp == "P") %>% 
+               filter(neighb_sp != "Q")))
+
+
+p_pairedgrowth_plot
+#ggsave(here("figures","pairedgrowth_byneighbor.png"), plot = p_pairedgrowth_plot, dpi = 600, width = 9, height = 5)
+```
+
+In this time period, bigcone growth was significantly greater for seedlings from either P or Q soil than for seedlings from C soil. Additionally, bigcones with neighbor Q soil grew significantly more than when their neighbors had either other soil history
+
+<br>
+<br>
+
+
+```{r, message = F, warning = F, echo = F}
+
+q_pair_grow_tuk = pair_grow %>%  filter(seedling_sp == "Q") %>% 
+  select(soil_type, neighb_sp) %>% 
+  distinct()
+
+for(i in 1:nrow(q_pair_grow_tuk)){
+  st = q_pair_grow_tuk$soil_type[i]
+  nsp = q_pair_grow_tuk$neighb_sp[i]
+  
+  anova = aov(aov(growth~neighb_st, data = pair_grow %>%  filter(seedling_sp == "Q") %>% 
+               filter(soil_type == st & neighb_sp == nsp)))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$neighb_st)
+  htib = tibble(neighb_st = rownames(dfx),
+                letters = dfx$Letters,
+                soil_type = st,
+                neighb_sp = nsp)
+  
+  if(i == 1){q_letters = htib}
+  else{q_letters = q_letters %>% bind_rows(htib)}
+}
+
+q_pairedgrowth_let = pair_grow %>%  left_join(q_letters)
+
+q_pairedgrowth_plot=  ggplot(q_pairedgrowth_let %>%  filter(seedling_sp == "Q"),
+         aes(x = neighb_st, y = sqrt(growth), fill = neighb_st))+ geom_boxplot(outlier.shape = NA)+
+  facet_grid(nsp_long~st_long)+gg_nsoilfill+theme_minimal()+
+  theme(axis.text.x = element_blank())+
+  labs(title = "Oak paired pot growth (Tukey results are within-panel)", x = "Neighbor Soil", 
+       y = "Growth in cm (t2//t1)")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))+
+  theme(plot.background = element_rect( linewidth = .3))+ 
+  geom_text(aes(x = neighb_st, y = 1.75, label = letters), size = 2.5)+lims(y = c(0.5, 2))
+
+
+q_pairedgrowth_plot
+
+#TukeyHSD(aov(growth~soil_type*neighb_sp*neighb_st, data = pair_grow %>%  filter(seedling_sp == "Q")))
+```
+
+Oaks were indistinguishable during this time period. When comparing neighbor soil types, C promoted growth over Q neighbor soil but insignificantly so (0 = 0.067).
+
+<br>
+<br>
+
+---
+
+
+## Are the differences in growth between sterile and live seedlings persistent throughout the whole exp? 
+```{r, message = F, include = F, warning = F}
+mass = masschange %>% 
+  filter(seedling_id %in% living$seedling_id) %>% 
+  filter(!(seedling_sp == "Q" & soil_type == "C" & neighb_sp == "P"))
+  
+
+growplot_trt = ggplot(mass, aes(x = soil_type, y = d_total, fill = treatment))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_droughtfill+theme_minimal()
+
+repotplot_trt = ggplot(mass, aes(x = soil_type, y = r_root+r_shoot, fill = treatment))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_droughtfill+theme_minimal()
+
+harvestplot_trt = ggplot(mass, aes(x = soil_type, y = h_root+h_shoot, fill = treatment))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_droughtfill+theme_minimal()
+```
+
+---
+
+
+### Differences in growth by neighbor species (given soil type)? 
+```{r, message = F, echo = F, warning = F, fig.dim = c(12, 5)}
+growplot_nsp = ggplot(mass, aes(x = st_longish, y = d_total, fill = neighb_sp))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_nspfill+theme_minimal()+
+  theme(legend.position = 'none')+labs(x = "Soil type", y = "Growth (harvest/repot)")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+repotplot_nsp = ggplot(mass, aes(x = st_longish, y = r_root+r_shoot, fill = neighb_sp))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_nspfill+theme_minimal()+
+  theme(legend.position = 'none')+labs(x = "", y = "Repot mass (g)", 
+                                       title = "Total mass x neighbor sp.")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+harvestplot_nsp = ggplot(mass, aes(x = st_longish, y = h_root+h_shoot, fill = neighb_sp))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_nspfill+theme_minimal()+
+  labs(x = "", y = "Harvest mass (g)")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+
+
+repotplot_nsp+growplot_nsp+harvestplot_nsp
+#ggsave(plot = growth_plot_nsp, width = 12, height = 5, here("figures", "growth_plot_nsp.png"))
+
+
+#TukeyHSD(aov(d_total~soil_type+neighb_sp, data = mass %>% filter(seedling_sp == "P")))
+# TukeyHSD(aov(h_root+h_shoot~neighb_sp*soil_type, data = mass %>% filter(seedling_sp == "Q") %>% 
+#                filter(soil_type != "C")))
+
+```
+Bigcone growth is significantly greater for both live soil treatment. Bigcone growth is significantly lower when planted next to an oak. This is relevant bc there are no C seedlings with neighbor Q. 
+Oaks also grow significantly worse next to oaks - with or without C seedlings included. Live soils grow more when compared to C soils but there is no difference between them. 
+
+```{r, message = F, echo = F, warning = F, fig.dim = c(12, 5)}
+growplot_nsp = ggplot(mass %>% 
+                        filter(seedling_sp=="P"), aes(x = st_longish, y = d_total, fill = neighb_sp))+
+  geom_boxplot(outlier.shape = NA)+gg_nspfill+theme_minimal()+
+  theme(legend.position = 'none')+labs(x = "Soil type", y = "Growth (harvest/repot)")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+repotplot_nsp = ggplot(mass %>% 
+                        filter(seedling_sp=="P"), aes(x = st_longish, y = r_root+r_shoot, fill = neighb_sp))+
+  geom_boxplot(outlier.shape = NA)+gg_nspfill+theme_minimal()+
+  theme(legend.position = 'none')+labs(x = "", y = "Repot mass (g)", 
+                                       title = "Total mass x neighbor sp.")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+harvestplot_nsp = ggplot(mass %>% 
+                        filter(seedling_sp=="P"), aes(x = st_longish, y = h_root+h_shoot, fill = neighb_sp))+
+  geom_boxplot(outlier.shape = NA)+gg_nspfill+theme_minimal()+
+  labs(x = "", y = "Harvest mass (g)")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+
+
+repotplot_nsp+growplot_nsp+harvestplot_nsp
+
+```
+
+
+```{r, message = F, echo = F, warning = F, fig.dim = c(12, 5)}
+rootgrowplot_nsp = ggplot(mass, aes(x = st_longish, y = d_root, fill = neighb_sp))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_nspfill+theme_minimal()+
+  theme(legend.position = 'none')+labs(x = "Soil type", y = "Root growth (harvest/repot)")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+rootrepotplot_nsp = ggplot(mass, aes(x = st_longish, y = r_root, fill = neighb_sp))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_nspfill+theme_minimal()+
+  theme(legend.position = 'none')+labs(x = "", y = "Repot root mass (g)", 
+                                       title = "Root mass x neighbor sp.")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+rootharvestplot_nsp = ggplot(mass, aes(x = st_longish, y = h_root, fill = neighb_sp))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_nspfill+theme_minimal()+
+  labs(x = "", y = "Harvest root mass (g)")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+ rootrepotplot_nsp+rootgrowplot_nsp+rootharvestplot_nsp
+#ggsave(plot = rootgrowth_plot_nsp, width = 12, height = 5, here("figures", "rootgrowth_plot_nsp.png"))
+
+ # TukeyHSD(aov(d_root~neighb_sp*soil_type, data = mass %>% filter(seedling_sp == "Q")))
+ # TukeyHSD(aov(d_root~neighb_sp*soil_type, data = mass %>% filter(seedling_sp == "Q") %>% 
+ #               filter(soil_type != "C")))
+```
+When including C seedlings, bigcones grow significantly more in both live soils. There is no effect of neighbor spp. When ignoring C seedlings, bigcones grow more roots next to oaks and Q soil is nearly significantly better then P soil (p = 0.0506).
+Oaks do consistently worse in root growth next to oaks, with or without C seedlings in the analysis. Live soils grow more roots. There is no difference between live soils. 
+
+
+
+```{r, message = F, echo = F, warning = F, fig.dim = c(12, 5)}
+shootgrowplot_nsp = ggplot(mass, aes(x = st_longish, y = d_shoot, fill = neighb_sp))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_nspfill+theme_minimal()+
+  theme(legend.position = 'none')+labs(x = "Soil type", y = "Shoot growth (harvest/repot)")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+shootrepotplot_nsp = ggplot(mass, aes(x = st_longish, y = r_shoot, fill = neighb_sp))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_nspfill+theme_minimal()+
+  theme(legend.position = 'none')+labs(x = "", y = "Repot shoot mass (g)", 
+                                       title = "Shoot mass x neighbor sp.")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+shootharvestplot_nsp = ggplot(mass, aes(x = st_longish, y = h_shoot, fill = neighb_sp))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_nspfill+theme_minimal()+
+  labs(x = "", y = "Harvest shoot mass (g)")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+shootrepotplot_nsp+shootgrowplot_nsp+shootharvestplot_nsp
+#ggsave(plot = shootgrowth_plot_nsp, width = 12, height = 5, here("figures", "shootgrowth_plot_nsp.png"))
+
+ # TukeyHSD(aov(d_shoot~neighb_sp*soil_type, data = mass %>% filter(seedling_sp == "Q")))
+ # TukeyHSD(aov(d_shoot~neighb_sp*soil_type, data = mass %>% filter(seedling_sp == "Q") %>% 
+ #               filter(soil_type != "C")))
+```
+Bigcones grow more aboveground when coming from live soils. No effect of neighbor species or difference between live soils in any case. 
+Oaks do worse next to oaks. P soil grow more than C soil when all are included. When C are dropped, there is no difference between neighbor spp. 
+
+<br>
+<br>
+
+### Differences in growth by soil type alone? 
+The above model descriptions will capture the significant trends in the below figures 
+
+```{r, message = F, echo = F, warning = F, fig.dim = c(12, 5)}
+growplot_st = ggplot(mass, aes(x = st_longish, y = d_total, fill = soil_type))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_soilfill+theme_minimal()+
+  theme(legend.position = 'none')+labs(x = "Soil type", y = "Total growth (harvest/repot)")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+repotplot_st = ggplot(mass, aes(x = st_longish, y = r_root+r_shoot, fill = soil_type))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_soilfill+theme_minimal()+
+  theme(legend.position = 'none')+labs(x = "", y = "Repot total mass (g)", 
+                                       title = "Total mass x soil type")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+harvestplot_st = ggplot(mass, aes(x = st_longish, y = h_root+h_shoot, fill = soil_type))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_soilfill+theme_minimal()+
+  labs(x = "", y = "Harvest total mass (g)")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+repotplot_st+growplot_st+harvestplot_st
+# growth_plot_st = repotplot_st+growplot_st+harvestplot_st
+# ggsave(plot = growth_plot_st, width = 12, height = 5, here("figures", "growth_plot_st.png"))
+# 
+# TukeyHSD(aov((r_root+r_shoot)~soil_type, data = mass %>%  filter(seedling_sp=="P")))
+# TukeyHSD(aov(d_total~soil_type, data = mass %>%  filter(seedling_sp=="P")))
+
+```
+
+```{r, message = F, eval = F, echo = F, warning = F, fig.dim = c(12, 5)}
+
+## No droughted seedlings
+growplot_st = ggplot(mass %>% 
+                       filter(treatment == "C"), aes(x = st_longish, y = d_total, fill = soil_type))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_soilfill+theme_minimal()+
+  theme(legend.position = 'none')+labs(x = "Soil type", y = "Total growth (harvest/repot)")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+repotplot_st = ggplot(mass%>% 
+                       filter(treatment == "C"), aes(x = st_longish, y = r_root+r_shoot, fill = soil_type))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_soilfill+theme_minimal()+
+  theme(legend.position = 'none')+labs(x = "", y = "Repot total mass (g)", 
+                                       title = "Total mass x soil type")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+harvestplot_st = ggplot(mass%>% 
+                       filter(treatment == "C"), aes(x = st_longish, y = h_root+h_shoot, fill = soil_type))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_soilfill+theme_minimal()+
+  labs(x = "", y = "Harvest total mass (g)")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+repotplot_st+growplot_st+harvestplot_st
+
+```
+
+```{r, message = F, echo = F, warning = F, fig.dim = c(12, 5)}
+
+## No droughted seedlings
+exam = mass %>% 
+  filter(treatment == "C") %>% 
+  filter(seedling_sp == "P")
+
+growplot_st = ggplot(exam, aes(x = st_longish, y = d_total, fill = soil_type))+
+  geom_boxplot(outlier.shape = NA)+gg_soilfill+theme_minimal()+
+  theme(legend.position = 'none')+labs(x = "Soil type", y = "Total growth (harvest/repot)", title = "Watered bigcones only")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+repotplot_st = ggplot(exam, aes(x = st_longish, y = r_root+r_shoot, fill = soil_type))+
+  geom_boxplot(outlier.shape = NA)+gg_soilfill+theme_minimal()+
+  theme(legend.position = 'none')+labs(x = "", y = "Repot total mass (g)", 
+                                       title = "Total mass x soil type")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+harvestplot_st = ggplot(exam, aes(x = st_longish, y = h_root+h_shoot, fill = soil_type))+
+  geom_boxplot(outlier.shape = NA)+gg_soilfill+theme_minimal()+
+  labs(x = "", y = "Harvest total mass (g)")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+repotplot_st+growplot_st+harvestplot_st
+
+```
+
+```{r, message = F, echo = F, warning = F, fig.dim = c(12, 5)}
+
+## No droughted seedlings
+exam = mass  %>% 
+  filter(seedling_sp == "P")
+
+growplot_st = ggplot(exam, aes(x = st_longish, y = d_total, fill = treatment))+
+  geom_boxplot(outlier.shape = NA)+gg_droughtfill+theme_minimal()+
+  theme(legend.position = 'none')+labs(x = "Soil type", y = "Total growth (harvest/repot)", title = "Watered bigcones only")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+repotplot_st = ggplot(exam, aes(x = st_longish, y = r_root+r_shoot, fill = treatment))+
+  geom_boxplot(outlier.shape = NA)+gg_droughtfill+theme_minimal()+
+  theme(legend.position = 'none')+labs(x = "", y = "Repot total mass (g)", 
+                                       title = "Total mass x soil type")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+harvestplot_st = ggplot(exam, aes(x = st_longish, y = h_root+h_shoot, fill = treatment))+
+  geom_boxplot(outlier.shape = NA)+gg_droughtfill+theme_minimal()+
+  labs(x = "", y = "Harvest total mass (g)")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+repotplot_st+growplot_st+harvestplot_st
+
+```
+
+```{r, message = F, echo = F, warning = F, fig.dim = c(12, 5)}
+r_growplot_st = ggplot(mass, aes(x = st_longish, y = d_root, fill = soil_type))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_soilfill+theme_minimal()+
+  theme(legend.position = 'none')+labs(x = "Soil type", y = "Total root growth (harvest/repot)")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+r_repotplot_st = ggplot(mass, aes(x = st_longish, y = r_root, fill = soil_type))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_soilfill+theme_minimal()+
+  theme(legend.position = 'none')+labs(x = "", y = "Repot root mass (g)", 
+                                       title = "Root mass x soil type")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+r_harvestplot_st = ggplot(mass, aes(x = st_longish, y = h_root, fill = soil_type))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_soilfill+theme_minimal()+
+  labs(x = "", y = "Harvest root mass (g)")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+r_repotplot_st+r_growplot_st+r_harvestplot_st
+# r_growth_plot_st = r_repotplot_st+r_growplot_st+r_harvestplot_st
+# ggsave(plot = r_growth_plot_st, width = 12, height = 5, here("figures", "r_growth_plot_st.png"))
+# 
+# TukeyHSD(aov((r_root)~soil_type, data = mass %>%  filter(seedling_sp=="Q")))
+# TukeyHSD(aov(d_root~soil_type, data = mass %>%  filter(seedling_sp=="Q")))
+
+```
+
+```{r, message = F, echo = F, warning = F, fig.dim = c(12, 5)}
+s_growplot_st = ggplot(mass, aes(x = st_longish, y = d_shoot, fill = soil_type))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_soilfill+theme_minimal()+
+  theme(legend.position = 'none')+labs(x = "Soil type", y = "Total shoot growth (harvest/repot)")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+s_repotplot_st = ggplot(mass, aes(x = st_longish, y = r_shoot, fill = soil_type))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_soilfill+theme_minimal()+
+  theme(legend.position = 'none')+labs(x = "", y = "Repot shoot mass (g)", 
+                                       title = "Shoot mass x soil type")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+s_harvestplot_st = ggplot(mass, aes(x = st_longish, y = h_shoot, fill = soil_type))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(~seedling_sp, scales = "free")+gg_soilfill+theme_minimal()+
+  labs(x = "", y = "Harvest shoot mass (g)")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+s_repotplot_st+s_growplot_st+s_harvestplot_st
+# s_growth_plot_st = s_repotplot_st+s_growplot_st+s_harvestplot_st
+# ggsave(plot = s_growth_plot_st, width = 12, height = 5, here("figures", "s_growth_plot_st.png"))
+
+# TukeyHSD(aov((r_shoot)~soil_type, data = mass %>%  filter(seedling_sp=="Q")))
+# TukeyHSD(aov(d_shoot~soil_type, data = mass %>%  filter(seedling_sp=="Q")))
+
+```
+
+<br>
+
+---
+
+<br>
+
+## Is home soil really bad in drought?
+
+In previous iterations, there were suggestive trends in drought performance pointing to seedling declines the more home soil influence was in the pot. I am going to try to put some more stats to this to see if any of the trends are significant. 
+
+<br>
+
+```{r, message = F, echo = F, warning = F}
+match_df = mass %>% 
+  mutate(match_soil = case_when(
+    seedling_sp == soil_type & seedling_sp == neighb_st ~ 2,
+    seedling_sp == soil_type & seedling_sp != neighb_st ~ 1,
+    seedling_sp != soil_type & seedling_sp == neighb_st ~ 1,
+    .default= 0
+  )) %>% 
+  left_join(health %>% 
+              select(seedling_id, mean_ndvi) %>%  group_by(seedling_id) %>% 
+              summarize(ndvi = mean(mean_ndvi))) %>% 
+  filter(seedling_id %in% living$seedling_id) %>% 
+  filter(soil_type != "C") %>% 
+  filter(neighb_st != "C")
+```
+
+
+```{r, message = F, echo = F, warning = F}
+
+  
+ggplot(match_df, aes(x = as.factor(match_soil), y = ndvi, fill = treatment))+
+  facet_wrap(~sp_long, scales = "free")+
+  geom_point(aes(color = treatment),position = position_jitterdodge(jitter.width = 0.15), alpha = 0.9)+
+  geom_smooth(aes(color = treatment),se = F,method = "lm")+
+  geom_boxplot(outlier.shape = NA, alpha = 0.8)+
+  gg_droughtfill+gg_droughtcolor+
+  labs(x = "Home soil match", y = "Average NDVI")+theme_minimal()+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))+
+  theme(plot.background = element_rect( linewidth = .3))+
+  scale_y_continuous(breaks = c(0,1,2))
+
+ggplot(match_df, aes(x = as.factor(match_soil), y = ndvi, fill = treatment))+
+  facet_wrap(~sp_long, scales = "free")+
+  geom_point(aes(color = treatment),position = position_jitterdodge(jitter.width = 0.15), alpha = 0.9)+
+    geom_boxplot(outlier.shape = NA, alpha = 0.8)+
+  geom_smooth(aes(x = match_soil+1, y = ndvi, color = treatment),se = F,method = "lm")+
+  gg_droughtfill+gg_droughtcolor+
+  labs(x = "Home soil match", y = "Average NDVI")+theme_minimal()+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))+
+  theme(plot.background = element_rect( linewidth = .3))
+
+ggplot(match_df %>% filter(seedling_sp == "P"), aes(x = as.factor(match_soil), y = ndvi, fill = treatment))+
+  facet_wrap(~nsp_long, scales = "free")+
+  geom_point(aes(color = treatment),position = position_jitterdodge(jitter.width = 0.15), alpha = 0.9)+
+    geom_boxplot(outlier.shape = NA, alpha = 0.8)+
+  geom_smooth(aes(x = match_soil+1, y = ndvi, color = treatment),se = F,method = "lm")+
+  gg_droughtfill+gg_droughtcolor+
+  labs(x = "Home soil match", y = "Average NDVI")+theme_minimal()+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))+
+  theme(plot.background = element_rect( linewidth = .3))
+
+# summary(lm(ndvi~treatment*match_soil, data =match_df %>%  filter(seedling_sp == "P")))
+# summary(lm(ndvi~treatment*match_soil, data =match_df %>%  filter(seedling_sp == "Q")))
+```
+
+Bigcone seedlings have a significant interaction between Drought treatment and increasing home soil, leading to a decline in NDVI. Oak differences are not significant
+
+<br>
+
+#### Adding in neighbor species to the same question
+
+```{r, message = F, echo = F, warning = F}
+ggplot(match_df, aes(x = as.factor(match_soil), y = ndvi, fill = treatment))+
+  geom_boxplot()+facet_wrap(sp_long~nsp_long, scales = "free")+gg_droughtfill+
+  labs(x = "Home soil match", y = "Average NDVI")+theme_minimal()+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))+
+  theme(plot.background = element_rect( linewidth = .3))
+```
+
+
+```{r, message = F, echo = F, warning = F}
+anova = aov(aov(ndvi~as.factor(match_soil)*neighb_sp*treatment, data = match_df %>% filter(seedling_sp == "Q")))
+  tuk = TukeyHSD(anova)
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$`as.factor(match_soil):neighb_sp:treatment`$Letters)
+  htib = tibble(m_nsp = colnames(dfx),
+                match = as.numeric(str_sub(m_nsp, 2,2)),
+                neighb_sp = str_sub(m_nsp, 4,4),
+                treatment = str_sub(m_nsp, 6,6),
+                letters = dfx[,1]) %>% 
+    select(-m_nsp)
+  
+  
+  
+match_let = match_df %>% filter(seedling_sp == "P") %>%  left_join(htib)%>% 
+  mutate(lab_y = quantile(ndvi, probs = 0.75, na.rm = T)+IQR(ndvi, na.rm = T)*1.75)
+
+ggplot(match_let, aes(x = as.factor(match_soil), y = ndvi, fill = treatment))+
+  geom_boxplot()+facet_wrap(~nsp_long, scales = "free")+gg_droughtfill+
+  labs(x = "Home soil match", y = "Average NDVI")+theme_minimal()+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))+
+  theme(plot.background = element_rect( linewidth = .3))+gg_droughtcolor
+
+ggplot(match_let, aes(x = as.factor(match_soil), y = ndvi, fill = treatment))+
+  geom_boxplot()+facet_wrap(~nsp_long, scales = "free")+gg_droughtfill+
+  labs(x = "Home soil match", y = "Average NDVI")+theme_minimal()+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))+
+  theme(plot.background = element_rect( linewidth = .3))+gg_droughtcolor
+
+ggplot(match_let, aes(x = (match_soil), y = ndvi, color = treatment))+
+  geom_point(position = position_jitter(width = 0.1))+
+  facet_wrap(~nsp_long, scales = "free")+gg_droughtcolor+
+  geom_smooth(method = "lm", se = F)+
+  labs(x = "Home soil match", y = "Average NDVI")+theme_minimal()+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))+
+  theme(plot.background = element_rect( linewidth = .3))+gg_droughtcolor
+
+ggplot(match_let, aes(x = (match_soil), y = ndvi, color = treatment))+
+  geom_point(position = position_jitter(width = 0.1))+gg_droughtcolor+
+  geom_smooth(method = "lm", se = F)+
+  labs(x = "Home soil match", y = "Average NDVI")+theme_minimal()+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))+
+  theme(plot.background = element_rect( linewidth = .3))+gg_droughtcolor
+
+
+ggplot(match_let, aes(x = as.factor(match_soil), y = ndvi, fill = treatment))+
+  geom_boxplot()+gg_droughtfill+
+  labs(x = "Home soil match", y = "Average NDVI")+theme_minimal()+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))+
+  theme(plot.background = element_rect( linewidth = .3))+gg_droughtcolor
+
+ggplot(match_df, aes(x = as.factor(match_soil), y = ndvi, fill = treatment))+
+  geom_boxplot()+gg_droughtfill+facet_grid(~sp_long)+
+  labs(x = "Home soil match", y = "Average NDVI")+theme_minimal()+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))+
+  theme(plot.background = element_rect( linewidth = .3))+gg_droughtcolor
+
+ summary(lm(ndvi~treatment*match_soil, data =match_df %>%  filter(seedling_sp == "P")))
+# summary(lm(ndvi~treatment*match_soil*neighb_sp, data =match_df %>%  filter(seedling_sp == "Q")))
+```
+
+When including an interaction of neighbor species, bigcones' significant interaction between drought and home soil p-value shifts to 0.0513. Oaks, on the other hand have a strong significant interaction when they're in next to a conspecific in drought with increasing home soil. Also, drought predicts NDVI and drought*neighbor species is marginal at p = 0.0543
+
+<br>
+
+#### Models of match
+
+**Bigcone NDVI model selection and coefficients: **
+```{r, message = F, echo = F, warning = F, fig.dim = c(12, 5)}
+
+mp = MASS::stepAIC(lm(ndvi~treatment*match_soil*neighb_sp, 
+                      data =match_df %>%  filter(seedling_sp == "Q")), trace = F)
+
+mp$call
+s1 = summary(eval(mp$call))
+kable(s1$coefficients)%>%
+  kable_classic(full_width = F, html_font = "Cambria")
+```
+
+
+
+<br>
+
+**Oak NDVI model selection and coefficients: **
+```{r, message = F, echo = F, warning = F}
+
+mp = MASS::stepAIC(lm(ndvi~treatment*match_soil*neighb_sp, 
+                      data =match_df %>%  filter(seedling_sp == "Q")), trace = F)
+mp$call
+s1 = summary(eval(mp$call))
+kableExtra::kable(s1$coefficients)%>%
+  kable_styling(full_width = T)
+```
+
+<br>
+
+### Out of curiosity I investigated whether these trends showed up in the growth data as well. 
+
+```{r, message = F, echo = F, warning = F}
+ggplot(match_df, aes(x = as.factor(match_soil), y = d_total, fill = treatment))+
+  geom_boxplot(outlier.shape = NA)+facet_wrap(sp_long~nsp_long, scales = "free")+gg_droughtfill+
+  labs(x = "Home soil match", y = "Total growth (biomass)")+theme_minimal()+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))+
+  theme(plot.background = element_rect( linewidth = .3))
+
+# summary(lm(d_total~treatment*match_soil, data =match_df %>%  filter(seedling_sp == "P")))
+# summary(lm(d_total~treatment*match_soil, data =match_df %>%  filter(seedling_sp == "Q")))
+
+```
+
+The differences are less strong here for the bigcones, where growth is largely driven by neighbor species, with some slight suggestion of match causing problems with drought (see model below). But oak outcomes are strongly driven by both neighbor species and by match/drought. Pretty cool.
+
+
+<br>
+<br>
+
+#### Models of match
+
+**Bigcone growth model selection and coefficients:** 
+```{r, message = F, echo = F, warning = F}
+
+mp = MASS::stepAIC(lm(d_total~treatment*match_soil*neighb_sp, 
+                      data =match_df %>%  filter(seedling_sp == "P")), trace = F)
+mp$call
+s1 = summary(eval(mp$call))
+kableExtra::kable(s1$coefficients)%>%
+  kable_styling(full_width = T)
+```
+
+<br>
+
+**Oak growth model selection and coefficients: **
+```{r, message = F, echo = F, warning = F}
+
+mp = MASS::stepAIC(lm(d_total~treatment*match_soil*neighb_sp, 
+                      data =match_df %>%  filter(seedling_sp == "Q")), trace = F)
+mp$call
+s1 = summary(eval(mp$call))
+kableExtra::kable(s1$coefficients)%>%
+  kable_styling(full_width = T)
+```
+
+<br>
+<br>
+
+---
+
+<br>
+
+
+## What is the distribution of NDVI for each of the species? If bimodal, could show collapse of microbial benefit...
+
+This stems from studies finding that the directionality of PSF can be reversed through environmebtal stress, specifically drought. 
+
+```{r, echo=F, warning = F, message=F}
+dist_ndvi = health %>% 
+  group_by(seedling_id ) %>% 
+  summarise(ndvi = min(mean_ndvi)) %>% 
+  left_join(total_treat) %>% 
+  filter(seedling_id %in% living$seedling_id) 
+
+ggplot(dist_ndvi, aes(x = ndvi, fill = soil_type))+
+  geom_histogram()+facet_wrap(seedling_sp~treatment)
+
+ggplot(dist_ndvi %>%  filter(soil_type != "C"), aes(x = ndvi, fill = soil_type))+
+  geom_histogram()+facet_wrap(seedling_sp~treatment)
+
+dist_ndvi = health %>% 
+  filter(sample == 4) %>% 
+  select(seedling_id, mean_ndvi) %>% 
+  rename(ndvi =mean_ndvi) %>% 
+  left_join(total_treat) %>% 
+  filter(seedling_id %in% living$seedling_id)
+# 
+# ggplot(dist_ndvi, aes(x = ndvi, fill = soil_type))+
+#   geom_histogram(position = "dodge")+facet_wrap(seedling_sp~treatment)
+
+# ggplot(dist_ndvi %>%  filter(seedling_sp == "P"), aes(x = ndvi, fill = neighb_sp))+
+#   geom_histogram(position = "dodge")+facet_grid(soil_type~treatment)+labs(title = "Bigcone")
+# ggplot(dist_ndvi %>%  filter(seedling_sp == "Q"), aes(x = ndvi, fill = neighb_sp))+
+#   geom_histogram(position = "dodge")+facet_grid(soil_type~treatment)+labs(title = "Oaks")
+
+ggplot(dist_ndvi, aes(x = ndvi, fill = treatment))+
+  geom_histogram(position = "dodge")+facet_wrap(sp_long~treatment)+gg_droughtfill+labs(title = "All soil types")
+
+ggplot(dist_ndvi %>% filter(soil_type != "C"), aes(x = ndvi, fill = treatment))+
+  geom_histogram(position = "dodge")+facet_wrap(sp_long~treatment)+gg_droughtfill+labs(title = "C soil removed")
+```
+
+<br>
+<br>
+
+---
+
+<br>
+
+## LMA
+
+
+
+```{r, eval=F, echo=F, warning = F, message=F}
+lma_df = harvest_mass %>% 
+  rename(foliar_area = foliar) %>% 
+  left_join(image_data %>% select(foliar, seedling_id)) %>% 
+  left_join(measure %>%  select(seedling_id, diameter_mm, date) %>% 
+              filter(date == "2023-03-01")) %>%
+  mutate(lma = foliar/foliar_area) %>% 
+  mutate(la_sa = foliar_area/((diameter_mm/2)^2*pi)) %>% 
+  left_join(total_treat) %>% 
+  filter(soil_type != "C")%>% 
+  filter(neighb_st != "C")%>% 
+  mutate(n_tot = paste0(neighb_sp, "_", neighb_st)) %>% 
+  left_join(total_treat) %>% 
+  mutate(n_long = case_when(
+    n_tot == "P_P" ~ "N: Bigcone\nNS: Bigcone",
+    n_tot == "P_Q" ~ "N: Bigcone\nNS: Oak",
+    n_tot == "Q_P" ~ "N: Oak\nNS: Bigcone",
+    n_tot == "Q_Q" ~ "N: Oak\nNS: Oak",
+  ))
+
+ggplot(lma_df , aes(x = neighb_st, y = log(la_sa), fill = treatment, col = soil_type))+
+  geom_boxplot(alpha = 0.8)+gg_soilcolor+gg_droughtfill+facet_wrap(~seedling_sp)
+
+ggplot(lma_df , aes(x = n_long, y = log(la_sa), fill = treatment, col = soil_type))+
+  geom_boxplot(alpha = 0.8)+gg_soilcolor+gg_droughtfill+facet_wrap(~seedling_sp)
+
+ggplot(lma_df %>% filter(seedling_sp =="P"), aes(x = neighb_st, y = log(la_sa), fill = treatment, col = neighb_sp))+
+  geom_boxplot(alpha = 0.8)+gg_nspcolor+gg_droughtfill+facet_wrap(~soil_type)
+
+ggplot(lma_df %>% filter(seedling_sp =="P"), aes(x = neighb_sp, y = log(la_sa), fill = treatment, col = neighb_st))+
+  geom_boxplot(alpha = 0.8)+gg_nsoilcolor+gg_droughtfill+facet_wrap(~soil_type)
+```
+
+<br>
+
+---
+
+<br>
+
+## Plant-soil feedbacks
+
+PSF = 100(Bh -Ba)/(Ba)
+
+Where:
+
+- Bh is a biomass value in home soil
+
+- Ba is the average biomass  value in away soil
+
+
+```{r, echo=F, warning = F, message=F}
+mass_build = harvest_mass %>% 
+  mutate(total = shoot+foliar+root) %>% 
+  mutate(all_above = shoot+foliar) %>% 
+  left_join(total_treat)
+
+
+away_means = mass_build %>% 
+  filter(soil_type != "C")%>% 
+  filter(neighb_st != "C") %>% 
+  filter(seedling_sp != soil_type) %>% 
+  group_by(seedling_sp, neighb_sp, neighb_st, treatment) %>% 
+  summarise(away_shoot = mean(all_above),
+            away_total = mean(total, na.rm = T))
+
+home_set = mass_build %>% 
+  filter(soil_type != "C")%>% 
+  filter(neighb_st != "C") %>% 
+  filter(seedling_sp == soil_type) %>% 
+  left_join(away_means) %>% 
+  mutate(effect_shoot = 100*(all_above-away_shoot)/(away_shoot))%>% 
+  mutate(effect_total = 100*(total-away_total)/(away_total)) %>% 
+  group_by(seedling_sp, neighb_sp, neighb_st, treatment) %>% 
+  summarise(
+    psf_shoot = mean(effect_shoot, na.rm = T),
+    psf_sd_shoot = sd(effect_shoot, na.rm = T),
+    psf_total = mean(effect_total, na.rm = T),
+    psf_sd_total = sd(effect_total, na.rm = T)) %>% 
+  mutate(n_tot = paste0(neighb_sp, "_", neighb_st)) %>% 
+  left_join(total_treat) %>% 
+  mutate(n_long = case_when(
+    n_tot == "P_P" ~ "N: Bigcone\nNS: Bigcone",
+    n_tot == "P_Q" ~ "N: Bigcone\nNS: Oak",
+    n_tot == "Q_P" ~ "N: Oak\nNS: Bigcone",
+    n_tot == "Q_Q" ~ "N: Oak\nNS: Oak",
+  ))
+
+ggplot(home_set, aes(x = n_long, y = psf_shoot, fill = treatment, group = treatment))+
+  geom_bar(stat = "identity", position = "dodge")+facet_wrap(~sp_long)+gg_droughtfill+theme_minimal()+
+  labs(x = "Neighbor Info", y = "PSF for Shoot Biomass")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+ggplot(home_set, aes(x = n_long, y = psf_total, fill = treatment, group = treatment))+
+  geom_bar(stat = "identity", position = "dodge")+facet_wrap(~sp_long)+gg_droughtfill+theme_minimal()+
+  labs(x = "Neighbor Info", y = "PSF for Total Biomass")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+home_set_nosum = mass_build %>% 
+  filter(soil_type != "C")%>% 
+  filter(neighb_st != "C") %>% 
+  filter(seedling_sp == soil_type) %>% 
+  left_join(away_means) %>% 
+  mutate(effect_shoot = 100*(all_above-away_shoot)/(away_shoot))%>% 
+  mutate(effect_total = 100*(total-away_total)/(away_total)) %>% 
+  mutate(n_tot = paste0(neighb_sp, "_", neighb_st)) %>% 
+  left_join(total_treat) %>% 
+  mutate(n_long = case_when(
+    n_tot == "P_P" ~ "N: Bigcone\nNS: Bigcone",
+    n_tot == "P_Q" ~ "N: Bigcone\nNS: Oak",
+    n_tot == "Q_P" ~ "N: Oak\nNS: Bigcone",
+    n_tot == "Q_Q" ~ "N: Oak\nNS: Oak",
+  )) %>% 
+  ungroup()
+
+ggplot(home_set_nosum, aes(x = n_long, y = effect_total, fill = treatment))+
+  geom_hline(yintercept = 0, col = "red", linetype = "dashed")+
+  geom_boxplot()+facet_wrap(~sp_long)+gg_droughtfill+theme_minimal()+
+  labs(x = "Neighbor Info", y = "PSF for Total Biomass")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+# 
+# TukeyHSD(aov(formula = effect_total ~ treatment*neighb_sp*neighb_st, data = home_set_nosum %>% 
+#     filter(seedling_sp == "Q")))
+
+```
+
+
+```{r, echo=F, warning = F, message=F}
+mass_build = mass %>% 
+  mutate(total = d_total) %>% 
+  left_join(total_treat)
+
+
+away_means = mass_build %>% 
+  filter(soil_type != "C")%>% 
+  filter(neighb_st != "C") %>% 
+  filter(seedling_sp != soil_type) %>% 
+  group_by(seedling_sp, neighb_sp, neighb_st, treatment) %>% 
+  summarise(away_total = mean(total, na.rm = T))
+
+home_set = mass_build %>% 
+  filter(soil_type != "C")%>% 
+  filter(neighb_st != "C") %>% 
+  filter(seedling_sp == soil_type) %>% 
+  left_join(away_means) %>% 
+  mutate(effect_total = 100*(total-away_total)/(away_total)) %>% 
+  group_by(seedling_sp, neighb_sp, neighb_st, treatment) %>% 
+  summarise(
+    psf_total = mean(effect_total, na.rm = T),
+    psf_sd_total = sd(effect_total, na.rm = T)) %>% 
+  mutate(n_tot = paste0(neighb_sp, "_", neighb_st)) %>% 
+  left_join(total_treat) %>% 
+  mutate(n_long = case_when(
+    n_tot == "P_P" ~ "N: Bigcone\nNS: Bigcone",
+    n_tot == "P_Q" ~ "N: Bigcone\nNS: Oak",
+    n_tot == "Q_P" ~ "N: Oak\nNS: Bigcone",
+    n_tot == "Q_Q" ~ "N: Oak\nNS: Oak",
+  ))
+
+
+ggplot(home_set, aes(x = n_long, y = psf_total, fill = treatment, group = treatment))+
+  geom_bar(stat = "identity", position = "dodge")+facet_wrap(~sp_long)+gg_droughtfill+theme_minimal()+
+  labs(x = "Neighbor Info", y = "PSF for Growth")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+home_set_nosum = mass_build %>% 
+  filter(soil_type != "C")%>% 
+  filter(neighb_st != "C") %>% 
+  filter(seedling_sp == soil_type) %>% 
+  left_join(away_means) %>% 
+  mutate(effect_total = 100*(total-away_total)/(away_total)) %>% 
+  mutate(n_tot = paste0(neighb_sp, "_", neighb_st)) %>% 
+  left_join(total_treat) %>% 
+  mutate(n_long = case_when(
+    n_tot == "P_P" ~ "N: Bigcone\nNS: Bigcone",
+    n_tot == "P_Q" ~ "N: Bigcone\nNS: Oak",
+    n_tot == "Q_P" ~ "N: Oak\nNS: Bigcone",
+    n_tot == "Q_Q" ~ "N: Oak\nNS: Oak",
+  )) %>% 
+  ungroup()
+
+ggplot(home_set_nosum, aes(x = n_long, y = effect_total, fill = treatment))+
+  geom_hline(yintercept = 0, col = "red", linetype = "dashed")+
+  geom_boxplot()+facet_wrap(~sp_long)+gg_droughtfill+theme_minimal()+
+  labs(x = "Neighbor Info", y = "PSF for Growth")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+# 
+# TukeyHSD(aov(formula = effect_total ~ treatment*neighb_sp*neighb_st, data = home_set_nosum %>% 
+#     filter(seedling_sp == "Q")))
+
+```
+<br>
+<br>
+
+
+#### the same as above, but ignoring neighbor soil type
+
+```{r,  echo=F, warning = F, message=F}
+mass_build = harvest_mass %>% 
+  mutate(total = shoot+foliar+root) %>% 
+  mutate(all_above = shoot+foliar) %>% 
+  left_join(total_treat)
+
+
+away_means = mass_build %>% 
+  filter(soil_type != "C")%>% 
+  filter(neighb_st != "C") %>% 
+  filter(seedling_sp != soil_type) %>% 
+  group_by(seedling_sp, neighb_sp, treatment) %>% 
+  summarise(away_shoot = mean(all_above),
+            away_total = mean(total, na.rm = T))
+
+home_set = mass_build %>% 
+  filter(soil_type != "C")%>% 
+  filter(neighb_st != "C") %>% 
+  filter(seedling_sp == soil_type) %>% 
+  left_join(away_means) %>% 
+  mutate(effect_shoot = 100*(all_above-away_shoot)/(away_shoot))%>% 
+  mutate(effect_total = 100*(total-away_total)/(away_total)) %>% 
+  group_by(seedling_sp, neighb_sp, treatment) %>% 
+  summarise(
+    psf_shoot = mean(effect_shoot, na.rm = T),
+    psf_sd_shoot = sd(effect_shoot, na.rm = T),
+    psf_total = mean(effect_total, na.rm = T),
+    psf_sd_total = sd(effect_total, na.rm = T)) 
+
+# ggplot(home_set, aes(x = neighb_sp, y = psf_shoot, fill = treatment, group = treatment))+
+#   geom_bar(stat = "identity", position = "dodge")+facet_wrap(~seedling_sp)+gg_droughtfill+theme_minimal()+
+#   labs(x = "Neighbor Info", y = "PSF for Shot Biomass")+ 
+#   theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+ggplot(home_set, aes(x = neighb_sp, y = psf_total, fill = treatment, group = treatment))+
+  geom_bar(stat = "identity", position = "dodge")+facet_wrap(~seedling_sp)+gg_droughtfill+theme_minimal()+
+  labs(x = "Neighbor Info", y = "PSF for Total Biomass")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+
+home_set_nosum = mass_build %>% 
+  filter(soil_type != "C")%>% 
+  filter(neighb_st != "C") %>% 
+  filter(seedling_sp == soil_type) %>% 
+  left_join(away_means) %>% 
+  mutate(effect_shoot = 100*(all_above-away_shoot)/(away_shoot))%>% 
+  mutate(effect_total = 100*(total-away_total)/(away_total))
+
+ggplot(home_set_nosum, aes(x = nsp_long, y = effect_shoot, fill = treatment))+
+  geom_hline(yintercept = 0, col = "red", linetype = "dashed")+
+  geom_boxplot()+facet_wrap(~sp_long)+gg_droughtfill+theme_minimal()+
+  labs(x = "Neighbor Info", y = "PSF for Total Biomass")+ 
+  theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5))
+
+# TukeyHSD(aov(effect_total~neighb_sp*treatment, data = home_set_nosum %>% filter(seedling_sp == "P")))
+# TukeyHSD(aov(effect_total~neighb_sp*treatment, data = home_set_nosum %>% filter(seedling_sp == "Q")))
+
+```
+Bigcone PSF are worse in drought (P = 0.07). The effect is significant when next to oaks.
+
+Oak PSF are significantly more negative next to Bigcones.
+
+
+
+## PSF with C seedlings
+
+I dont think it makes sense to compare home soil to all away soil types as a whole. it would be better to run independent PSF tests for each of the alternate soil types. The below will now reflect that
+```{r,  echo=F, warning = F, message=F}
+mass_build = harvest_mass %>% 
+  mutate(total = shoot+foliar+root) %>% 
+  mutate(all_above = shoot+foliar) %>% 
+  left_join(total_treat) %>% 
+  filter(!(seedling_sp == "Q" & soil_type =="C" & neighb_sp == "P"))
+
+
+away_means = mass_build %>% 
+  filter(soil_type != "C")%>% 
+  filter(neighb_st != "C") %>% 
+  filter(seedling_sp != soil_type) %>% 
+  group_by(seedling_sp, neighb_sp, neighb_st, treatment) %>% 
+  summarise(away_shoot = mean(all_above),
+            away_total = mean(total, na.rm = T))
+
+home_set = mass_build %>% 
+  filter(soil_type != "C")%>% 
+  filter(neighb_st != "C") %>% 
+  filter(seedling_sp == soil_type) %>% 
+  left_join(away_means) %>% 
+  mutate(effect_shoot = 100*(all_above-away_shoot)/(away_shoot))%>% 
+  mutate(effect_total = 100*(total-away_total)/(away_total)) %>% 
+  group_by(seedling_sp, neighb_sp, neighb_st, treatment) %>% 
+  summarise(
+    psf_shoot = mean(effect_shoot, na.rm = T),
+    psf_sd_shoot = sd(effect_shoot, na.rm = T),
+    psf_total = mean(effect_total, na.rm = T),
+    psf_sd_total = sd(effect_total, na.rm = T)) %>% 
+  mutate(n_tot = paste0(neighb_sp, "_", neighb_st)) %>% 
+  left_join(total_treat) %>% 
+  mutate(n_long = case_when(
+    n_tot == "P_P" ~ "N: Bigcone\nNS: Bigcone",
+    n_tot == "P_Q" ~ "N: Bigcone\nNS: Oak",
+    n_tot == "Q_P" ~ "N: Oak\nNS: Bigcone",
+    n_tot == "Q_Q" ~ "N: Oak\nNS: Oak",
+    n_tot == "P_C" ~ "N: Bigcone\nNS: Sterile",
+    n_tot == "Q_C" ~ "N: Oak\nNS: Sterile"
+  ))
+
+alive_shoot = ggplot(home_set, aes(x = n_long, y = psf_shoot, fill = treatment, group = treatment))+
+  geom_bar(stat = "identity", position = "dodge")+facet_wrap(~sp_long)+gg_droughtfill+theme_minimal()+
+  labs(x = "Neighbor Info", y = "PSF for Shoot Biomass", title = "Away is live")
+
+alive_total = ggplot(home_set, aes(x = n_long, y = psf_total, fill = treatment, group = treatment))+
+  geom_bar(stat = "identity", position = "dodge")+facet_wrap(~sp_long)+gg_droughtfill+theme_minimal()+
+  labs(x = "Neighbor Info", y = "PSF for Total Biomass", title = "Away is live")+theme(legend.position = 'none')
+
+
+home_set_nosum = mass_build %>% 
+  filter(soil_type != "C")%>% 
+  filter(neighb_st != "C") %>% 
+  filter(seedling_sp == soil_type) %>% 
+  left_join(away_means) %>% 
+  mutate(effect_shoot = 100*(all_above-away_shoot)/(away_shoot))%>% 
+  mutate(effect_total = 100*(total-away_total)/(away_total)) %>% 
+  mutate(n_tot = paste0(neighb_sp, "_", neighb_st)) %>% 
+  left_join(total_treat) %>% 
+  mutate(n_long = case_when(
+    n_tot == "P_P" ~ "N: Bigcone\nNS: Bigcone",
+    n_tot == "P_Q" ~ "N: Bigcone\nNS: Oak",
+    n_tot == "Q_P" ~ "N: Oak\nNS: Bigcone",
+    n_tot == "Q_Q" ~ "N: Oak\nNS: Oak",
+    n_tot == "P_C" ~ "N: Bigcone\nNS: Sterile",
+    n_tot == "Q_C" ~ "N: Oak\nNS: Sterile"
+  )) %>% 
+  ungroup()
+
+alive_box = ggplot(home_set_nosum, aes(x = n_long, y = effect_total, fill = treatment))+
+  geom_hline(yintercept = 0, col = "red", linetype = "dashed")+
+  geom_boxplot()+facet_wrap(~sp_long)+gg_droughtfill+theme_minimal()+
+  labs(x = "Neighbor Info", y = "PSF for Total Biomass", title = "Away is live")+theme(legend.position = 'none')
+
+
+
+
+away_means = mass_build %>% 
+  filter(soil_type == "C") %>% 
+  group_by(seedling_sp, neighb_sp, neighb_st, treatment) %>% 
+  summarise(away_shoot = mean(all_above),
+            away_total = mean(total, na.rm = T))
+
+home_set = mass_build  %>% 
+  filter(seedling_sp == soil_type) %>% 
+  left_join(away_means) %>% 
+  mutate(effect_shoot = 100*(all_above-away_shoot)/(away_shoot))%>% 
+  mutate(effect_total = 100*(total-away_total)/(away_total)) %>% 
+  group_by(seedling_sp, neighb_sp, neighb_st, treatment) %>% 
+  summarise(
+    psf_shoot = mean(effect_shoot, na.rm = T),
+    psf_sd_shoot = sd(effect_shoot, na.rm = T),
+    psf_total = mean(effect_total, na.rm = T),
+    psf_sd_total = sd(effect_total, na.rm = T)) %>% 
+  mutate(n_tot = paste0(neighb_sp, "_", neighb_st)) %>% 
+  left_join(total_treat) %>% 
+  mutate(n_long = case_when(
+    n_tot == "P_P" ~ "N: Bigcone\nNS: Bigcone",
+    n_tot == "P_Q" ~ "N: Bigcone\nNS: Oak",
+    n_tot == "Q_P" ~ "N: Oak\nNS: Bigcone",
+    n_tot == "Q_Q" ~ "N: Oak\nNS: Oak",
+    n_tot == "P_C" ~ "N: Bigcone\nNS: Sterile",
+    n_tot == "Q_C" ~ "N: Oak\nNS: Sterile"
+  ))%>% 
+  filter(!is.na(psf_total))
+
+sterile_shoot = ggplot(home_set, aes(x = n_long, y = psf_shoot, fill = treatment, group = treatment))+
+  geom_bar(stat = "identity", position = "dodge")+facet_wrap(~sp_long, scales ="free")+gg_droughtfill+theme_minimal()+
+  labs(x = "Neighbor Info", y = "PSF for Shoot Biomass", title = "Away is sterile")
+
+sterile_tot = ggplot(home_set, aes(x = n_long, y = psf_total, fill = treatment, group = treatment))+
+  geom_bar(stat = "identity", position = "dodge")+facet_wrap(~sp_long, scales ="free")+
+  gg_droughtfill+theme_minimal()+
+  labs(x = "Neighbor Info", y = "PSF for Total Biomass", title = "Away is sterile")
+
+home_set_nosum = mass_build  %>% 
+  filter(seedling_sp == soil_type) %>% 
+  left_join(away_means) %>% 
+  mutate(effect_shoot = 100*(all_above-away_shoot)/(away_shoot))%>% 
+  mutate(effect_total = 100*(total-away_total)/(away_total)) %>% 
+  mutate(n_tot = paste0(neighb_sp, "_", neighb_st)) %>% 
+  left_join(total_treat) %>% 
+  mutate(n_long = case_when(
+    n_tot == "P_P" ~ "N: Bigcone\nNS: Bigcone",
+    n_tot == "P_Q" ~ "N: Bigcone\nNS: Oak",
+    n_tot == "Q_P" ~ "N: Oak\nNS: Bigcone",
+    n_tot == "Q_Q" ~ "N: Oak\nNS: Oak",
+    n_tot == "P_C" ~ "N: Bigcone\nNS: Sterile",
+    n_tot == "Q_C" ~ "N: Oak\nNS: Sterile"
+  )) %>% 
+  ungroup() %>% 
+  filter(!is.na(effect_total))
+
+sterile_box = ggplot(home_set_nosum, aes(x = n_long, y = effect_total, fill = treatment))+
+  geom_hline(yintercept = 0, col = "red", linetype = "dashed")+
+  geom_boxplot()+facet_wrap(~sp_long, scales ="free")+gg_droughtfill+theme_minimal()+
+  labs(x = "Neighbor Info", y = "PSF for Total Biomass", title = "Away is sterile")
+```
+
+
+```{r, echo=F, warning = F, message=F, fig.dim = c(15, 5)}
+alive_total+sterile_tot
+```
+
+
+```{r, echo=F, warning = F, message=F, fig.dim = c(15, 5)}
+alive_box+sterile_box
+```
+
+<br>
+
+---
+
+<br>
+
+## Like PSF but to question the effect of drought 
+
+(home = drought, meaning that negative values mean droughted seedlings did worse)
+
+```{r,  echo=F, warning = F, message=F}
+mass_build = harvest_mass %>% 
+  mutate(total = shoot+foliar+root) %>% 
+  mutate(all_above = shoot+foliar) %>% 
+  left_join(total_treat)
+
+
+away_means = mass_build %>% 
+  filter(soil_type != "C")%>% 
+  filter(neighb_st != "C") %>% 
+  filter(treatment != "D") %>% 
+  group_by(seedling_sp, neighb_sp, neighb_st, soil_type) %>% 
+  summarise(away_shoot = mean(all_above),
+            away_total = mean(total, na.rm = T))
+
+home_set = mass_build %>% 
+  filter(soil_type != "C")%>% 
+  filter(neighb_st != "C") %>% 
+  filter(treatment != "C") %>% 
+  left_join(away_means) %>% 
+  mutate(effect_shoot = 100*(all_above-away_shoot)/(away_shoot))%>% 
+  mutate(effect_total = 100*(total-away_total)/(away_total)) %>% 
+  group_by(seedling_sp, neighb_sp,neighb_st, treatment, soil_type) %>% 
+  summarise(
+    psf_shoot = mean(effect_shoot, na.rm = T),
+    psf_sd_shoot = sd(effect_shoot, na.rm = T),
+    psf_total = mean(effect_total, na.rm = T),
+    psf_sd_total = sd(effect_total, na.rm = T)) %>% 
+  mutate(n_tot = paste0(neighb_sp, "_", neighb_st)) %>% 
+  left_join(total_treat) %>% 
+  mutate(n_long = case_when(
+    n_tot == "P_P" ~ "N: Bigcone\nNS: Bigcone",
+    n_tot == "P_Q" ~ "N: Bigcone\nNS: Oak",
+    n_tot == "Q_P" ~ "N: Oak\nNS: Bigcone",
+    n_tot == "Q_Q" ~ "N: Oak\nNS: Oak",
+  ))
+
+# ggplot(home_set, aes(x = n_long, y = psf_shoot, fill = soil_type))+
+#   geom_bar(stat = "identity", position = "dodge")+facet_wrap(~seedling_sp)+gg_soilfill+theme_minimal()
+# 
+# ggplot(home_set, aes(x = n_long, y = psf_total, fill = soil_type))+
+#   geom_bar(stat = "identity", position = "dodge")+facet_wrap(~seedling_sp)+gg_soilfill+theme_minimal()
+
+
+home_set_nosum = mass_build %>% 
+  filter(soil_type != "C")%>% 
+  filter(neighb_st != "C") %>% 
+  filter(treatment=="D") %>% 
+  left_join(away_means) %>% 
+  mutate(effect_shoot = 100*(all_above-away_shoot)/(away_shoot))%>% 
+  mutate(effect_total = 100*(total-away_total)/(away_total)) %>% 
+  mutate(n_tot = paste0(neighb_sp, "_", neighb_st)) %>% 
+  left_join(total_treat) %>% 
+  mutate(n_long = case_when(
+    n_tot == "P_P" ~ "N: Bigcone\nNS: Bigcone",
+    n_tot == "P_Q" ~ "N: Bigcone\nNS: Oak",
+    n_tot == "Q_P" ~ "N: Oak\nNS: Bigcone",
+    n_tot == "Q_Q" ~ "N: Oak\nNS: Oak",
+  ))
+
+noc = ggplot(home_set_nosum, aes(x = n_long, y = effect_total, fill = soil_type))+
+  geom_hline(yintercept = 0, col = "red", linetype = "dashed")+
+  geom_boxplot()+facet_wrap(~sp_long)+gg_soilfill+theme_minimal()+
+  theme(legend.position = 'none')+
+  labs(x = "Neighbor Info", y = "Drought effect for Total Biomass")
+```
+
+
+```{r,  echo=F, warning = F, message=F}
+#with C still included
+
+mass_build = harvest_mass %>% 
+  filter(seedling_id %in% living$seedling_id)%>% 
+  mutate(total = shoot+foliar+root) %>% 
+  mutate(all_above = shoot+foliar) %>% 
+  left_join(total_treat)
+
+
+away_means = mass_build %>% 
+  filter(treatment != "D") %>% 
+  group_by(seedling_sp, neighb_sp, neighb_st, soil_type) %>% 
+  summarise(away_shoot = mean(all_above),
+            away_total = mean(total, na.rm = T))
+
+home_set = mass_build %>% 
+  filter(treatment != "C") %>% 
+  left_join(away_means) %>% 
+  mutate(effect_shoot = 100*(all_above-away_shoot)/(away_shoot))%>% 
+  mutate(effect_total = 100*(total-away_total)/(away_total)) %>% 
+  group_by(seedling_sp, neighb_sp,neighb_st, treatment, soil_type) %>% 
+  summarise(
+    psf_shoot = mean(effect_shoot, na.rm = T),
+    psf_sd_shoot = sd(effect_shoot, na.rm = T),
+    psf_total = mean(effect_total, na.rm = T),
+    psf_sd_total = sd(effect_total, na.rm = T)) %>% 
+  mutate(n_tot = paste0(neighb_sp, "_", neighb_st)) %>% 
+  left_join(total_treat) %>% 
+  mutate(n_long = case_when(
+    n_tot == "P_P" ~ "N: Bigcone\nNS: Bigcone",
+    n_tot == "P_Q" ~ "N: Bigcone\nNS: Oak",
+    n_tot == "Q_P" ~ "N: Oak\nNS: Bigcone",
+    n_tot == "Q_Q" ~ "N: Oak\nNS: Oak",
+    n_tot == "P_C" ~ "N: Bigcone\nNS: Sterile",
+    n_tot == "Q_C" ~ "N: Oak\nNS: Sterile"
+  ))
+
+# ggplot(home_set, aes(x = n_long, y = psf_shoot, fill = soil_type))+
+#   geom_bar(stat = "identity", position = "dodge")+facet_wrap(~seedling_sp)+gg_soilfill+theme_minimal()
+# 
+# ggplot(home_set, aes(x = n_long, y = psf_total, fill = soil_type))+
+#   geom_bar(stat = "identity", position = "dodge")+facet_wrap(~seedling_sp)+gg_soilfill+theme_minimal()
+
+
+home_set_nosum = mass_build %>% 
+  filter(treatment=="D") %>% 
+  left_join(away_means) %>% 
+  mutate(effect_shoot = 100*(all_above-away_shoot)/(away_shoot))%>% 
+  mutate(effect_total = 100*(total-away_total)/(away_total)) %>% 
+  mutate(n_tot = paste0(neighb_sp, "_", neighb_st)) %>% 
+  left_join(total_treat) %>% 
+  mutate(n_long = case_when(
+    n_tot == "P_P" ~ "N: Bigcone\nNS: Bigcone",
+    n_tot == "P_Q" ~ "N: Bigcone\nNS: Oak",
+    n_tot == "Q_P" ~ "N: Oak\nNS: Bigcone",
+    n_tot == "Q_Q" ~ "N: Oak\nNS: Oak",
+    n_tot == "P_C" ~ "N: Bigcone\nNS: Sterile",
+    n_tot == "Q_C" ~ "N: Oak\nNS: Sterile"
+  ))
+
+wc = ggplot(home_set_nosum, aes(x = n_long, y = effect_total, fill = soil_type))+
+  geom_hline(yintercept = 0, col = "red", linetype = "dashed")+
+  geom_boxplot()+facet_wrap(~sp_long, scales = "free")+gg_soilfill+theme_minimal()+
+  labs(x = "Neighbor Info", y = "Drought effect for Total Biomass")
+```
+
+
+
+```{r, echo=F, warning = F, message=F, fig.dim = c(15, 5)}
+noc+wc
+```
+
+
+```{r,  echo=F, warning = F, message=F}
+#with C still included
+
+mass_build = harvest_mass %>% 
+  filter(seedling_id %in% living$seedling_id)%>% 
+  mutate(total = shoot+foliar+root) %>% 
+  mutate(all_above = shoot+foliar) %>% 
+  left_join(total_treat)
+
+
+away_means = mass_build %>% 
+  filter(treatment != "D") %>% 
+  group_by(seedling_sp, neighb_sp, neighb_st, soil_type) %>% 
+  summarise(away_shoot = mean(all_above),
+            away_total = mean(total, na.rm = T))
+
+home_set = mass_build %>% 
+  filter(treatment != "C") %>% 
+  left_join(away_means) %>% 
+  mutate(effect_shoot = 100*(all_above-away_shoot)/(away_shoot))%>% 
+  mutate(effect_total = 100*(total-away_total)/(away_total)) %>% 
+  group_by(seedling_sp, neighb_sp,neighb_st, treatment, soil_type) %>% 
+  summarise(
+    psf_shoot = mean(effect_shoot, na.rm = T),
+    psf_sd_shoot = sd(effect_shoot, na.rm = T),
+    psf_total = mean(effect_total, na.rm = T),
+    psf_sd_total = sd(effect_total, na.rm = T)) %>% 
+  mutate(n_tot = paste0(neighb_sp, "_", neighb_st)) %>% 
+  left_join(total_treat) %>% 
+  mutate(n_long = case_when(
+    n_tot == "P_P" ~ "N: Bigcone\nNS: Bigcone",
+    n_tot == "P_Q" ~ "N: Bigcone\nNS: Oak",
+    n_tot == "Q_P" ~ "N: Oak\nNS: Bigcone",
+    n_tot == "Q_Q" ~ "N: Oak\nNS: Oak",
+    n_tot == "P_C" ~ "N: Bigcone\nNS: Sterile",
+    n_tot == "Q_C" ~ "N: Oak\nNS: Sterile"
+  ))
+
+
+home_set_nosum = mass_build %>% 
+  filter(treatment=="D") %>% 
+  left_join(away_means) %>% 
+  mutate(effect_shoot = 100*(all_above-away_shoot)/(away_shoot))%>% 
+  mutate(effect_total = 100*(total-away_total)/(away_total)) %>% 
+  mutate(n_tot = paste0(neighb_sp, "_", neighb_st)) %>% 
+  left_join(total_treat) %>% 
+  mutate(n_long = case_when(
+    n_tot == "P_P" ~ "N: Bigcone\nNS: Bigcone",
+    n_tot == "P_Q" ~ "N: Bigcone\nNS: Oak",
+    n_tot == "Q_P" ~ "N: Oak\nNS: Bigcone",
+    n_tot == "Q_Q" ~ "N: Oak\nNS: Oak",
+    n_tot == "P_C" ~ "N: Bigcone\nNS: Sterile",
+    n_tot == "Q_C" ~ "N: Oak\nNS: Sterile"
+  )) %>% 
+  filter(seedling_sp == "P")
+
+ggplot(home_set_nosum, aes(x = soil_type, y = effect_total, fill = soil_type, color = neighb_sp))+
+  geom_hline(yintercept = 0, col = "red", linetype = "dashed")+
+  geom_boxplot()+facet_wrap(~sp_long, scales = "free")+gg_soilfill+theme_minimal()+
+  labs(x = "Neighbor Info", y = "Drought effect for Total Biomass")
+```
+
+```{r,  echo=F, warning = F, message=F}
+#with C still included
+
+mass_build = harvest_mass %>% 
+  filter(seedling_id %in% living$seedling_id)%>% 
+  left_join(total_treat) %>% 
+  left_join(health %>% 
+  group_by(seedling_id) %>% 
+  summarize(ndvi = mean(mean_ndvi)))
+
+
+away_means = mass_build %>% 
+  filter(treatment != "D") %>% 
+  group_by(seedling_sp, neighb_sp, neighb_st, soil_type) %>% 
+  summarise(away = mean(ndvi))
+
+home_set = mass_build %>% 
+  filter(treatment != "C") %>% 
+  left_join(away_means) %>% 
+  mutate(effect = 100*(ndvi-away)/(away))%>% 
+  group_by(seedling_sp, neighb_sp,neighb_st, treatment, soil_type) %>% 
+  mutate(n_tot = paste0(neighb_sp, "_", neighb_st)) %>% 
+  left_join(total_treat) %>% 
+  mutate(n_long = case_when(
+    n_tot == "P_P" ~ "N: Bigcone\nNS: Bigcone",
+    n_tot == "P_Q" ~ "N: Bigcone\nNS: Oak",
+    n_tot == "Q_P" ~ "N: Oak\nNS: Bigcone",
+    n_tot == "Q_Q" ~ "N: Oak\nNS: Oak",
+    n_tot == "P_C" ~ "N: Bigcone\nNS: Sterile",
+    n_tot == "Q_C" ~ "N: Oak\nNS: Sterile"
+  ))
+
+anova = aov(aov(effect~soil_type*neighb_sp*neighb_st, data = home_set %>% filter(seedling_sp == "P")))
+  tuk = TukeyHSD(anova)
+  tuk$`neighb_sp:neighb_st`[!complete.cases(tuk$`neighb_sp:neighb_st`),] <- 0
+  tuk$`soil_type:neighb_sp`[!complete.cases(tuk$`soil_type:neighb_sp`),] <- 0 
+  tuk$`soil_type:neighb_st`[!complete.cases(tuk$`soil_type:neighb_st`),] <- 0
+  tuk$`soil_type:neighb_sp:neighb_st`[!complete.cases(tuk$`soil_type:neighb_sp:neighb_st`),] <- 0
+  
+  cld = multcompLetters4(anova, tuk)
+  dfx = as.data.frame.list(cld$`soil_type:neighb_sp:neighb_st`)
+  htib = tibble(s_n_ns = rownames(dfx),
+                soil_type = str_sub(s_n_ns, 1,1),
+                neighb_sp = str_sub(s_n_ns, 3,3),
+                neighb_st = str_sub(s_n_ns, 5,5),
+                letters = dfx$Letters) %>% 
+    dplyr::select(-s_n_ns)
+  
+home_set_let = home_set %>%  left_join(htib)%>% 
+  group_by(soil_type, neighb_st, neighb_sp) %>% 
+  mutate(lab_y = max(effect)*1.05)
+
+
+
+ggplot(home_set_let %>% filter(seedling_sp == "P"), 
+       aes(x = soil_type, y = effect, fill = soil_type, color = neighb_st))+
+  geom_hline(yintercept = 0, col = "red", linetype = "dashed")+
+  geom_boxplot(alpha = 0.8, outlier.shape = NA)+facet_wrap(~nsp_long, scales = "free")+
+  gg_soilfill+gg_nsoilcolord+theme_minimal()+
+  labs(x = "Soil type", y = "Drought effect (NDVI)")
+```

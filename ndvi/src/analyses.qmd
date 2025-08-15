@@ -1,0 +1,199 @@
+---
+title: "ndvi_analysis"
+format: html
+---
+
+```{r setup}
+
+library(here)
+library(janitor)
+library(lubridate)
+library(tidyverse)
+library(patchwork)
+
+pine_col = "#347846"
+oak_col = "#ccba54"
+cont_col = "#4d52a3"
+drought_col = "#ab5346"
+```
+
+
+```{r}
+ndvi = read_csv(here("data/ghecto_fullndvi.csv")) %>% 
+  clean_names() %>% 
+  drop_na()
+drought = read_csv(here("data/drought_treatments.csv"))%>% 
+  clean_names()
+gh_size = read_csv(here("data/seedling_measurements.csv"))%>% 
+  clean_names()
+neighbor = read_csv(here("data/ghecto_neighbor_pairs.csv")) %>% 
+  clean_names()
+
+neighb_long = neighbor %>% 
+  rename(seedling_id = seedling_1, neighbor = seedling_2) %>% 
+  bind_rows(neighbor %>% 
+  rename(seedling_id = seedling_2, neighbor = seedling_1)  
+              )
+
+master = gh_size %>% 
+  select(seedling_id, seedling_sp, soil_type) %>% 
+  distinct() %>% 
+  left_join(neighb_long) %>% 
+  filter(!is.na(pot)) %>% 
+  left_join(drought) %>% 
+  left_join(ndvi) %>% 
+  filter(!is.na(treatment))
+  
+```
+
+```{r}
+ggplot(master, aes(x = as.factor(sample), y = mean_ndvi, fill = treatment))+
+  geom_boxplot()+facet_grid(cols = vars(seedling_sp))
+
+ggplot(master, aes(x = as.factor(sample), y = median_ndvi, fill = treatment))+
+  geom_boxplot()+facet_grid(cols = vars(seedling_sp))
+
+ggplot(master, aes(x = (sample), y = mean_ndvi, color = treatment))+
+  geom_jitter()+facet_grid(cols = vars(seedling_sp), rows = vars(soil_type))+
+  geom_smooth(method = "lm")
+
+ggplot(master, aes(x = (sample), y = median_ndvi, color = treatment))+
+  geom_jitter()+facet_grid(cols = vars(seedling_sp), rows = vars(soil_type))+
+  geom_smooth(method = "lm")
+
+pines = master %>% 
+  filter(seedling_sp == "P")
+
+oaks = master %>% 
+  filter(seedling_sp == "Q")
+
+t.test(mean_ndvi~treatment, data = pines %>% filter(sample == 1))
+t.test(mean_ndvi~treatment, data = pines %>% filter(sample == 4))
+
+
+t.test(mean_ndvi~treatment, data = oaks %>% filter(sample == 1))
+t.test(mean_ndvi~treatment, data = oaks %>% filter(sample == 4))
+
+```
+
+```{r}
+m_wide = master %>% 
+  distinct(seedling_id, sample, .keep_all = TRUE) %>% 
+  select(-median_ndvi, -sd_ndvi, -photo, -date_time) %>% 
+  mutate(sample = paste0("timepoint_", sample)) %>% 
+  pivot_wider(names_from = sample, values_from = mean_ndvi) %>% 
+  mutate(change_ndvi = timepoint_4 - timepoint_1) %>% 
+  mutate(trt = paste0(seedling_sp, soil_type)) %>% 
+  mutate(sp_long = case_when(
+    seedling_sp == "P" ~ "Bigcone", 
+    seedling_sp == "Q" ~ "Oak"
+  ))
+
+
+ggplot(m_wide, aes(x = seedling_sp, y = change_ndvi, fill = soil_type, group = trt, color = soil_type))+
+  geom_boxplot(alpha = 0.75)+ 
+  geom_point(position = position_jitterdodge(jitter.width = 0.15,), alpha=0.2) +
+  scale_color_manual(name = "Soil type", breaks = c("P", "Q", "C"), labels = c("Bigcone", "Oak", "Control"),values = c(pine_col, oak_col, cont_col))+
+  scale_fill_manual( name = "Soil type", breaks = c("P", "Q", "C"), labels = c("Bigcone", "Oak", "Control"),values = c(pine_col, oak_col, cont_col))+
+  facet_wrap(~treatment)+
+  theme_minimal()
+
+ggplot(m_wide, aes(x = soil_type, y = change_ndvi, fill = soil_type, color = treatment))+
+  geom_boxplot(alpha = 0.75)+ 
+  geom_point(position = position_jitterdodge(jitter.width = 0.15,), alpha=0.2) +
+  scale_color_manual(name = "Drought\ntreatment", breaks = c("C", "D"), labels = c("Control", "Drought"),values = c(cont_col, drought_col))+
+  scale_fill_manual( name = "Soil type", breaks = c("P", "Q", "C"), labels = c("Bigcone", "Oak", "Control"),values = c(pine_col, oak_col, cont_col))+
+  facet_wrap(~seedling_sp)+
+  theme_minimal()
+
+
+ggplot(m_wide, aes(x = seedling_sp, y = timepoint_4, fill = soil_type, group = trt, color = soil_type))+
+  geom_boxplot(alpha = 0.75)+ 
+  geom_point(position = position_jitterdodge(jitter.width = 0.15,), alpha=0.2) +
+  scale_color_manual(name = "Soil type", breaks = c("P", "Q", "C"), labels = c("Bigcone", "Oak", "Control"),values = c(pine_col, oak_col, cont_col))+
+  scale_fill_manual( name = "Soil type", breaks = c("P", "Q", "C"), labels = c("Bigcone", "Oak", "Control"),values = c(pine_col, oak_col, cont_col))+
+  facet_wrap(~treatment)+
+  theme_minimal()
+
+time_4 = ggplot(m_wide, aes(x = soil_type, y = timepoint_4, fill = soil_type, color = treatment))+
+  geom_boxplot(alpha = 0.75)+ 
+  geom_point(position = position_jitterdodge(jitter.width = 0.15,), alpha=0.2) +
+  scale_color_manual(name = "Drought\ntreatment", breaks = c("C", "D"), labels = c("Control", "Drought"),values = c(cont_col, drought_col))+
+  scale_fill_manual( name = "Soil type", breaks = c("P", "Q", "C"), labels = c("Bigcone", "Oak", "Control"),values = c(pine_col, oak_col, cont_col))+
+  facet_wrap(~sp_long)+ labs(x = "Soil Type", y = "NDVI", title = "Jan. 2023")+
+  theme_minimal()
+
+time_1 = ggplot(m_wide, aes(x = soil_type, y = timepoint_1, fill = soil_type, color = treatment))+
+  geom_boxplot(alpha = 0.75)+ 
+  geom_point(position = position_jitterdodge(jitter.width = 0.15,), alpha=0.2) +
+  scale_color_manual(name = "Drought\ntreatment", breaks = c("C", "D"), labels = c("Control", "Drought"),values = c(cont_col, drought_col))+
+  scale_fill_manual( name = "Soil type", breaks = c("P", "Q", "C"), labels = c("Bigcone", "Oak", "Control"),values = c(pine_col, oak_col, cont_col))+
+  facet_wrap(~sp_long)+ labs(x = "Soil Type", y = "NDVI", title = "July 2022")+
+  theme_minimal()+ theme(legend.position = "none")
+
+time_3 = ggplot(m_wide, aes(x = soil_type, y = timepoint_3, fill = soil_type, color = treatment))+
+  geom_boxplot(alpha = 0.75)+ 
+  geom_point(position = position_jitterdodge(jitter.width = 0.15,), alpha=0.2) +
+  scale_color_manual(name = "Drought\ntreatment", breaks = c("C", "D"), labels = c("Control", "Drought"),values = c(cont_col, drought_col))+
+  scale_fill_manual( name = "Soil type", breaks = c("P", "Q", "C"), labels = c("Bigcone", "Oak", "Control"),values = c(pine_col, oak_col, cont_col))+
+  facet_wrap(~sp_long)+ labs(x = "Soil Type", y = "NDVI", title = "Nov. 2022")+
+  theme_minimal()+ theme(legend.position = "none")
+
+time_2 = ggplot(m_wide, aes(x = soil_type, y = timepoint_2, fill = soil_type, color = treatment))+
+  geom_boxplot(alpha = 0.75)+ 
+  geom_point(position = position_jitterdodge(jitter.width = 0.15,), alpha=0.2) +
+  scale_color_manual(name = "Drought\ntreatment", breaks = c("C", "D"), labels = c("Control", "Drought"),values = c(cont_col, drought_col))+
+  scale_fill_manual( name = "Soil type", breaks = c("P", "Q", "C"), labels = c("Bigcone", "Oak", "Control"),values = c(pine_col, oak_col, cont_col))+
+  facet_wrap(~sp_long)+ labs(x = "Soil Type", y = "NDVI", title = "Sept. 2022")+
+  theme_minimal()+ theme(legend.position = "none")
+
+(time_1+time_2+time_3+time_4)+  plot_layout(nrow = 1)
+
+ggsave(here("figures", "ndvi_timeseries.png"), width = 20, height = 5)
+```
+
+How can I see whether mycorrhizal access might influence these outcomes? 
+a. Use colonization rate going into the pot
+  a1. sum colonization rates across members entering the pot? or average? 
+b. Look at aboveground spp composition? 
+c. Look at spp comp and soil types.
+
+```{r}
+p_wide = m_wide %>% 
+  filter(seedling_sp =="P") %>% 
+  left_join(m_wide %>%
+              select(seedling_id, seedling_sp, soil_type) %>% 
+              rename(neighbor = seedling_id, n_soil = soil_type, n_sp = seedling_sp ))
+
+q_wide = m_wide %>% 
+  filter(seedling_sp =="Q") %>% 
+  left_join(m_wide %>%
+              select(seedling_id, seedling_sp, soil_type) %>% 
+              rename(neighbor = seedling_id, n_soil = soil_type, n_sp = seedling_sp ))
+
+
+ggplot(p_wide, aes(x = soil_type, y = timepoint_4, fill = soil_type, color = treatment))+
+  geom_boxplot(alpha = 0.75)+ 
+  geom_point(position = position_jitterdodge(jitter.width = 0.15,), alpha=0.2) +
+  scale_color_manual(name = "Drought\ntreatment", breaks = c("C", "D"), labels = c("Control", "Drought"),values = c(cont_col, drought_col))+
+  scale_fill_manual( name = "Soil type", breaks = c("P", "Q", "C"), labels = c("Bigcone", "Oak", "Control"),values = c(pine_col, oak_col, cont_col))+
+  facet_grid(n_soil~n_sp)+ labs(x = "Soil Type", y = "NDVI")+
+  theme_minimal()
+
+  
+```
+
+
+I think drought had a larger effect on pots with more plant in them...
+
+
+
+
+
+
+
+
+
+
+
+
